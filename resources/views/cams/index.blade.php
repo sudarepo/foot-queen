@@ -11,7 +11,7 @@
 
     <section class="filters-bar">
         <form method="GET" action="{{ url()->current() }}" class="filters">
-            @foreach (['gender' => 'gender', 'category' => 'category', 'age' => 'age', 'hair' => 'hair', 'body' => 'body'] as $paramName => $metaKey)
+            @foreach (['category' => 'category', 'age' => 'age', 'hair' => 'hair', 'body' => 'body'] as $paramName => $metaKey)
                 <label class="filter">
                     <span class="filter__label">{{ ucfirst($paramName === 'age' ? 'Age' : $paramName) }}</span>
                     <select name="{{ $paramName }}" onchange="this.form.submit()">
