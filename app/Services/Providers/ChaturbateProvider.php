@@ -52,6 +52,8 @@ class ChaturbateProvider implements CamProviderInterface
                 'format'    => 'json',
                 'limit'     => self::PAGE_LIMIT,
                 'offset'    => $offset,
+                'gender'    => 'f',
+                'tag'       => 'feet',
             ]);
 
             if ($response->failed()) {
