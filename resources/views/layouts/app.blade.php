@@ -48,9 +48,9 @@
             </a>
             <nav class="site-nav">
                 <a href="/girls">Girls</a>
-                <a href="/guys">Guys</a>
-                <a href="/trans">Trans</a>
-                <a href="/couples">Couples</a>
+                <a href="http://gaycams.xxx" target="_blank" rel="noopener">Guys</a>
+                <a href="http://besttrannysex.com" target="_blank" rel="noopener">Trans</a>
+                <a href="http://erotictelevision.net" target="_blank" rel="noopener">Couples</a>
             </nav>
             <div class="site-header__meta">
                 <span class="live-pulse"></span>
