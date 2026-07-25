@@ -1,6 +1,8 @@
 @extends('layouts.app')
 
 @section('content')
+    @include('cams._structured-data')
+
     <div class="page-heading">
         <h1>{{ $h1 ?? 'FootQueen — Live Feet Cams' }}</h1>
         <h2 class="page-heading__sub">Watch sexy feet, soles, toes, and foot worship cams streaming 24/7 from verified performers.</h2>
@@ -39,7 +41,7 @@
     @else
         <section class="cam-grid">
             @foreach ($cams as $cam)
-                <a href="{{ route('cams.redirect', $cam) }}"
+                <a href="{{ route('cams.redirect', [$cam, 'src' => 'grid']) }}"
                    class="cam-card"
                    target="_blank"
                    rel="noopener nofollow">

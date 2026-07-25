@@ -3,7 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Models\Cam;
+use App\Models\CamClickEvent;
 use App\Services\SeoPageResolver;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -20,12 +22,12 @@ class CamController extends Controller
         $filters = $this->parseFilters($request);
 
         return $this->renderGrid(
-            filters:       $filters,
-            userFilters:   $filters,
-            h1:            'Live Cams',
-            title:         'Live Cams — Watch Free Webcams Now',
-            meta:          'Thousands of performers broadcasting live. Filter by gender, age, hair color, body type, and more.',
-            canonicalUrl:  url('/'),
+            filters: $filters,
+            userFilters: $filters,
+            h1: 'Live Cams',
+            title: 'Live Cams — Watch Free Webcams Now',
+            meta: 'Thousands of performers broadcasting live. Filter by gender, age, hair color, body type, and more.',
+            canonicalUrl: url('/'),
         );
     }
 
@@ -40,7 +42,7 @@ class CamController extends Controller
         $page = $slug ? $this->seo->find($slug) : null;
 
         if ($page === null) {
-            throw new NotFoundHttpException("Unknown landing page.");
+            throw new NotFoundHttpException('Unknown landing page.');
         }
 
         // User may additionally filter *on top of* the preset. Preset wins
@@ -51,22 +53,50 @@ class CamController extends Controller
         $canonicalUrl = url($this->seo->canonicalUrlFor($page));
 
         return $this->renderGrid(
-            filters:      $merged,
-            userFilters:  $userFilters,
-            h1:           $page['h1'],
-            title:        $page['title'],
-            meta:         $page['meta'],
+            filters: $merged,
+            userFilters: $userFilters,
+            h1: $page['h1'],
+            title: $page['title'],
+            meta: $page['meta'],
             canonicalUrl: $canonicalUrl,
         );
     }
 
-    public function redirectToRoom(Cam $cam)
+    /**
+     * Instagram-feed-style presentation of the same live cam data as the
+     * homepage — a design variant served on its own URL so it can be
+     * compared against the grid layout without touching "/".
+     */
+    public function feed(Request $request): View
     {
+        $filters = $this->parseFilters($request);
+
+        return $this->renderGrid(
+            filters: $filters,
+            userFilters: $filters,
+            h1: 'Live Cams',
+            title: 'Live Cams — Watch Free Webcams Now',
+            meta: 'Thousands of performers broadcasting live. Scroll the feed and tap in.',
+            canonicalUrl: url('/feed'),
+            view: 'cams.feed',
+        );
+    }
+
+    public function redirectToRoom(Request $request, Cam $cam): RedirectResponse
+    {
+        $source = $request->query('src');
+        $source = in_array($source, ['grid', 'feed'], strict: true) ? $source : 'grid';
+
+        CamClickEvent::create([
+            'cam_id' => $cam->id,
+            'source_page' => $source,
+        ]);
+
         return redirect()->away($cam->room_url);
     }
 
     /**
-     * Shared render path for both the homepage and all landing pages.
+     * Shared render path for the homepage, all landing pages, and the feed variant.
      */
     private function renderGrid(
         array $filters,
@@ -75,6 +105,7 @@ class CamController extends Controller
         string $title,
         string $meta,
         string $canonicalUrl,
+        string $view = 'cams.index',
     ): View {
         $cams = Cam::online()
             ->filter($filters)
@@ -82,14 +113,14 @@ class CamController extends Controller
             ->paginate(48)
             ->withQueryString();
 
-        return view('cams.index', [
-            'cams'         => $cams,
-            'filters'      => $userFilters,  // view only shows user-chosen filters in dropdowns
-            'filterMeta'   => $this->filterMeta(),
-            'totalOnline'  => Cam::online()->count(),
-            'h1'           => $h1,
-            'pageTitle'    => $title,
-            'metaDesc'     => $meta,
+        return view($view, [
+            'cams' => $cams,
+            'filters' => $userFilters,  // view only shows user-chosen filters in dropdowns
+            'filterMeta' => $this->filterMeta(),
+            'totalOnline' => Cam::online()->count(),
+            'h1' => $h1,
+            'pageTitle' => $title,
+            'metaDesc' => $meta,
             'canonicalUrl' => $canonicalUrl,
         ]);
     }
@@ -97,12 +128,12 @@ class CamController extends Controller
     private function parseFilters(Request $request): array
     {
         return array_filter([
-            'gender'     => $request->query('gender'),
-            'category'   => $request->query('category'),
-            'age_range'  => $request->query('age'),
+            'gender' => $request->query('gender'),
+            'category' => $request->query('category'),
+            'age_range' => $request->query('age'),
             'hair_color' => $request->query('hair'),
-            'body_type'  => $request->query('body'),
-            'hd'         => $request->query('hd') ? true : null,
+            'body_type' => $request->query('body'),
+            'hd' => $request->query('hd') ? true : null,
         ], fn ($v) => $v !== null && $v !== '');
     }
 
@@ -110,35 +141,35 @@ class CamController extends Controller
     {
         return [
             'gender' => [
-                ''       => 'All',
+                '' => 'All',
                 'female' => 'Female',
-                'male'   => 'Male',
-                'trans'  => 'Trans',
+                'male' => 'Male',
+                'trans' => 'Trans',
                 'couple' => 'Couples',
             ],
             'age' => [
-                ''      => 'Any age',
+                '' => 'Any age',
                 '18-22' => '18 – 22',
                 '23-29' => '23 – 29',
                 '30-39' => '30 – 39',
                 '40-49' => '40 – 49',
-                '50+'   => '50+',
+                '50+' => '50+',
             ],
             'hair' => [
-                ''         => 'Any hair',
-                'blonde'   => 'Blonde',
+                '' => 'Any hair',
+                'blonde' => 'Blonde',
                 'brunette' => 'Brunette',
-                'black'    => 'Black',
-                'red'      => 'Red',
-                'other'    => 'Other',
+                'black' => 'Black',
+                'red' => 'Red',
+                'other' => 'Other',
             ],
             'body' => [
-                ''         => 'Any body',
-                'slim'     => 'Slim',
+                '' => 'Any body',
+                'slim' => 'Slim',
                 'athletic' => 'Athletic',
-                'average'  => 'Average',
-                'curvy'    => 'Curvy',
-                'bbw'      => 'BBW',
+                'average' => 'Average',
+                'curvy' => 'Curvy',
+                'bbw' => 'BBW',
             ],
             'category' => array_merge(
                 ['' => 'All categories'],

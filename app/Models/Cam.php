@@ -2,17 +2,20 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class Cam extends Model
 {
+    use HasFactory;
+
     protected $guarded = [];
 
     protected $casts = [
-        'categories'   => 'array',
-        'is_online'    => 'boolean',
-        'is_hd'        => 'boolean',
-        'is_new'       => 'boolean',
+        'categories' => 'array',
+        'is_online' => 'boolean',
+        'is_hd' => 'boolean',
+        'is_new' => 'boolean',
         'last_seen_at' => 'datetime',
     ];
 
@@ -25,29 +28,29 @@ class Cam extends Model
 
     public function scopeFilter($query, array $filters)
     {
-        if (!empty($filters['gender'])) {
+        if (! empty($filters['gender'])) {
             $query->where('gender', $filters['gender']);
         }
 
-        if (!empty($filters['hair_color'])) {
+        if (! empty($filters['hair_color'])) {
             $query->where('hair_color', $filters['hair_color']);
         }
 
-        if (!empty($filters['body_type'])) {
+        if (! empty($filters['body_type'])) {
             $query->where('body_type', $filters['body_type']);
         }
 
-        if (!empty($filters['age_range'])) {
+        if (! empty($filters['age_range'])) {
             [$min, $max] = $this->ageRangeBounds($filters['age_range']);
             $query->whereBetween('age', [$min, $max]);
         }
 
-        if (!empty($filters['category'])) {
+        if (! empty($filters['category'])) {
             // JSON contains — MySQL 5.7+ / MariaDB 10.2+ / SQLite with JSON1
             $query->whereJsonContains('categories', $filters['category']);
         }
 
-        if (!empty($filters['hd'])) {
+        if (! empty($filters['hd'])) {
             $query->where('is_hd', true);
         }
 
@@ -61,7 +64,7 @@ class Cam extends Model
             '23-29' => [23, 29],
             '30-39' => [30, 39],
             '40-49' => [40, 49],
-            '50+'   => [50, 120],
+            '50+' => [50, 120],
             default => [18, 120],
         };
     }
