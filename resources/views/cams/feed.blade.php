@@ -16,6 +16,10 @@
             <p class="page-heading__count">
                 {{ number_format($cams->total()) }} cams online now
             </p>
+            <p class="ig-feed__notice">
+                Live video previews need third-party embeds allowed — an ad blocker or
+                strict privacy mode may block them. "Join the room" always works either way.
+            </p>
         </div>
 
         @if ($cams->isEmpty())
