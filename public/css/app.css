@@ -710,6 +710,17 @@ body {
     text-decoration: underline;
 }
 
+.ig-feed__notice {
+    margin-top: 10px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    max-width: 520px;
+    margin-left: auto;
+    margin-right: auto;
+    line-height: 1.5;
+}
+
 .ig-posts {
     display: flex;
     flex-direction: column;

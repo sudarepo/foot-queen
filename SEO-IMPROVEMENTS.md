@@ -82,6 +82,25 @@ One caveat worth knowing: the embed is Chaturbate's actual room widget (video
 there's no video-only option exposed via the affiliate API. It's cropped into
 a square card, which reads fine but isn't a bespoke minimal player.
 
+**Known limitation: ad blockers.** A report came in that the live preview
+"wasn't working." Investigation (curl'd the production HTML directly, then
+drove `https://www.footqueen.com/feed` with a real headless browser and
+hovered a card) confirmed the deployed code, data, and embed all work
+correctly — the video genuinely plays. The difference was the reporter's own
+ad blocker: Chaturbate iframes are commonly caught by ad-blocker filter lists
+since the same kind of third-party cam widget is often used for ads elsewhere
+on the web. There's no reliable client-side fix for this — a
+"did-the-iframe-actually-load" timeout was considered and rejected, because
+cross-origin restrictions mean the parent page can't inspect whether a
+same-origin `load` event corresponds to real content or an empty/blocked
+response; the heuristic would misfire more often than not and create false
+confidence. Instead, a small muted notice was added under the page heading
+(`.ig-feed__notice` in `resources/views/cams/feed.blade.php` /
+`public/css/app.css`) explaining that previews need third-party embeds
+allowed and that "Join the room" always works regardless — honest framing
+instead of pretending to detect and fix something that can't reliably be
+detected.
+
 ### 2. Click tracking (for comparing `/` vs `/feed`)
 
 - **Migration:** `database/migrations/2026_07_25_184605_create_cam_click_events_table.php`
