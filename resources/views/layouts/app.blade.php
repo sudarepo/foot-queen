@@ -46,7 +46,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,700;9..144,900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ asset('css/app.css') }}">
 </head>
-<body>
+<body class="@yield('bodyClass')">
     <header class="site-header">
         <div class="site-header__inner">
             <a href="{{ route('cams.index') }}" class="logo" aria-label="Foot Queen Cams — Home">
@@ -80,5 +80,7 @@
             2257 compliance maintained by the source platform.
         </div>
     </footer>
+
+    @stack('scripts')
 </body>
 </html>

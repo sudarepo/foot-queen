@@ -34,6 +34,7 @@ class ChaturbateProvider implements CamProviderInterface
         $wm = config('cam-providers.chaturbate.affiliate_id');
         if (empty($wm)) {
             Log::warning('Chaturbate affiliate_id is not set; skipping fetch.');
+
             return [];
         }
 
@@ -47,19 +48,19 @@ class ChaturbateProvider implements CamProviderInterface
         // There's no `next` field — we just increment offset until we've seen `count` rooms.
         while (true) {
             $response = Http::timeout(30)->get(self::ENDPOINT, [
-                'wm'        => $wm,
+                'wm' => $wm,
                 'client_ip' => 'request_ip',
-                'format'    => 'json',
-                'limit'     => self::PAGE_LIMIT,
-                'offset'    => $offset,
-                'gender'    => 'f',
-                'tag'       => 'feet',
+                'format' => 'json',
+                'limit' => self::PAGE_LIMIT,
+                'offset' => $offset,
+                'gender' => 'f',
+                'tag' => 'feet',
             ]);
 
             if ($response->failed()) {
                 Log::error('Chaturbate API failed', [
                     'status' => $response->status(),
-                    'body'   => substr($response->body(), 0, 500),
+                    'body' => substr($response->body(), 0, 500),
                 ]);
                 break;
             }
@@ -151,23 +152,52 @@ class ChaturbateProvider implements CamProviderInterface
         $thumb = $room['image_url_360x270'] ?? $room['image_url'] ?? null;
 
         return [
-            'provider'         => $this->getName(),
-            'external_id'      => $room['username'],
-            'username'         => $room['username'],
-            'gender'           => $gender,
-            'age'              => isset($room['age']) ? (int) $room['age'] : null,
-            'hair_color'       => $hair,
-            'body_type'        => $body,
-            'categories'       => $categories,
-            'viewers'          => (int) ($room['num_users'] ?? 0),
-            'thumbnail_url'    => $thumb,
-            'room_url'         => $roomUrl,
-            'room_subject'     => $room['room_subject'] ?? null,
-            'country'          => $room['country'] ?? null,
+            'provider' => $this->getName(),
+            'external_id' => $room['username'],
+            'username' => $room['username'],
+            'gender' => $gender,
+            'age' => isset($room['age']) ? (int) $room['age'] : null,
+            'hair_color' => $hair,
+            'body_type' => $body,
+            'categories' => $categories,
+            'viewers' => (int) ($room['num_users'] ?? 0),
+            'thumbnail_url' => $thumb,
+            'room_url' => $roomUrl,
+            'embed_url' => $this->extractEmbedUrl($room),
+            'room_subject' => $room['room_subject'] ?? null,
+            'country' => $room['country'] ?? null,
             'spoken_languages' => $room['spoken_languages'] ?? null,
-            'is_hd'            => (bool) ($room['is_hd'] ?? false),
-            'is_new'           => (bool) ($room['is_new'] ?? false),
-            'is_online'        => true,
+            'is_hd' => (bool) ($room['is_hd'] ?? false),
+            'is_new' => (bool) ($room['is_new'] ?? false),
+            'is_online' => true,
         ];
+    }
+
+    /**
+     * Chaturbate's API returns ready-made `<iframe>` embed snippets for
+     * affiliates — `iframe_embed_revshare` is the revenue-share-tracked one,
+     * meant for exactly this: embedding the live room on our own pages.
+     * We pull the `src` out of it and force `disable_sound=1` so hover
+     * previews don't autoplay audio.
+     */
+    private function extractEmbedUrl(array $room): ?string
+    {
+        $html = $room['iframe_embed_revshare'] ?? $room['iframe_embed'] ?? null;
+        if (empty($html) || ! preg_match('/src=[\'"]([^\'"]+)[\'"]/', $html, $matches)) {
+            return null;
+        }
+
+        $url = html_entity_decode($matches[1]);
+        $parts = parse_url($url);
+        if ($parts === false || empty($parts['host'])) {
+            return null;
+        }
+
+        parse_str($parts['query'] ?? '', $query);
+        $query['disable_sound'] = 1;
+
+        $path = $parts['path'] ?? '/';
+
+        return "https://{$parts['host']}{$path}?".http_build_query($query);
     }
 }

@@ -40,4 +40,18 @@ class CamFeedTest extends TestCase
 
         $this->get('/sitemap.xml')->assertSee(url('/feed'), false);
     }
+
+    public function test_feed_cards_expose_a_hover_preview_hook_only_when_an_embed_url_exists(): void
+    {
+        Cam::factory()->create([
+            'username' => 'has-preview',
+            'embed_url' => 'https://chaturbate.com/in/?tour=abc&campaign=Vg4Qi&track=embed&room=has-preview&disable_sound=1',
+        ]);
+        Cam::factory()->create(['username' => 'no-preview', 'embed_url' => null]);
+
+        $response = $this->get('/feed');
+
+        $response->assertSee('data-embed-url="https://chaturbate.com/in/?tour=abc&amp;campaign=Vg4Qi&amp;track=embed&amp;room=has-preview&amp;disable_sound=1"', false);
+        $this->assertSame(1, substr_count($response->getContent(), 'Live preview'));
+    }
 }
