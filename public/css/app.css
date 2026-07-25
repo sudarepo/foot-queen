@@ -817,6 +817,39 @@ body {
     gap: 4px;
 }
 
+.ig-post__preview-hint {
+    position: absolute;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.72);
+    backdrop-filter: blur(4px);
+    color: #fff;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    padding: 5px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--accent-hot);
+    pointer-events: none;
+    z-index: 1;
+    transition: opacity 0.15s;
+}
+
+.ig-post__media--live .ig-post__preview-hint {
+    opacity: 0;
+}
+
+.ig-post__live-embed {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    z-index: 2;
+    background: #000;
+}
+
 .ig-post__actions {
     display: flex;
     align-items: center;
@@ -870,8 +903,67 @@ body {
     background: var(--accent-hot);
 }
 
+/* The card currently playing a live preview — hover on desktop, or the
+   card in view on mobile — gets a visible highlight so it's obvious which
+   one you're watching. */
+.ig-post--active {
+    border-color: var(--accent-hot);
+    box-shadow: 0 0 0 2px var(--accent-hot), 0 12px 32px -8px rgba(232, 93, 34, 0.45);
+}
+
+/* "Scroll for next" nudge — mobile only, shown once when the first card
+   auto-activates and dismissed on the user's first scroll. */
+.ig-scroll-hint {
+    position: fixed;
+    left: 50%;
+    bottom: 20px;
+    transform: translateX(-50%);
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(0, 0, 0, 0.78);
+    backdrop-filter: blur(6px);
+    border: 1px solid var(--accent-hot);
+    color: #fff;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.03em;
+    padding: 10px 16px;
+    border-radius: 999px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+
+.ig-scroll-hint.is-visible {
+    opacity: 1;
+    animation: ig-scroll-hint-bounce 1.4s ease-in-out infinite;
+}
+
+@keyframes ig-scroll-hint-bounce {
+    0%, 100% { transform: translateX(-50%) translateY(0); }
+    50% { transform: translateX(-50%) translateY(6px); }
+}
+
 @media (max-width: 640px) {
     .ig-feed { max-width: 100%; }
+
+    /* Snap each post to the middle of the viewport as you scroll — the
+       TikTok/Reels "one at a time" feel — without hijacking scroll on the
+       rest of the page (proximity, not mandatory). */
+    body.is-feed-page {
+        scroll-snap-type: y proximity;
+    }
+
+    body.is-feed-page .ig-post {
+        scroll-snap-align: center;
+        scroll-snap-stop: normal;
+    }
+}
+
+@media (min-width: 780px) {
+    .ig-scroll-hint { display: none; }
 }
 
 /* Widen into a multi-column wall as viewport grows — a single 470px

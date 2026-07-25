@@ -18,6 +18,8 @@ namespace App\Services\Providers;
  *  - viewers          int
  *  - thumbnail_url    string
  *  - room_url         string   outbound URL with YOUR affiliate tracking
+ *  - embed_url        string|null   revenue-share-tracked <iframe> src for a
+ *                      live preview of the room, if the provider offers one
  *  - room_subject     string|null   the room title/description
  *  - country          string|null   ISO alpha-2 country code (when public)
  *  - spoken_languages string|null   e.g. "English, Spanish"

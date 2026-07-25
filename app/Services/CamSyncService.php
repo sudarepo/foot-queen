@@ -28,7 +28,7 @@ class CamSyncService
                 $results[$name] = $count;
                 Log::info("Synced {$count} cams from {$name}");
             } catch (\Throwable $e) {
-                Log::error("Sync failed for {$name}: " . $e->getMessage());
+                Log::error("Sync failed for {$name}: ".$e->getMessage());
                 $results[$name] = 0;
             }
         }
@@ -48,26 +48,27 @@ class CamSyncService
         foreach (array_chunk($cams, 500) as $chunk) {
             $rows = array_map(function ($cam) use ($now) {
                 return [
-                    'provider'         => $cam['provider'],
-                    'external_id'      => $cam['external_id'],
-                    'username'         => $cam['username'],
-                    'gender'           => $cam['gender'],
-                    'age'              => $cam['age'],
-                    'hair_color'       => $cam['hair_color'],
-                    'body_type'        => $cam['body_type'],
-                    'categories'       => json_encode($cam['categories'] ?? []),
-                    'viewers'          => $cam['viewers'],
-                    'thumbnail_url'    => $cam['thumbnail_url'],
-                    'room_url'         => $cam['room_url'],
-                    'room_subject'     => $cam['room_subject'] ?? null,
-                    'country'          => $cam['country'] ?? null,
+                    'provider' => $cam['provider'],
+                    'external_id' => $cam['external_id'],
+                    'username' => $cam['username'],
+                    'gender' => $cam['gender'],
+                    'age' => $cam['age'],
+                    'hair_color' => $cam['hair_color'],
+                    'body_type' => $cam['body_type'],
+                    'categories' => json_encode($cam['categories'] ?? []),
+                    'viewers' => $cam['viewers'],
+                    'thumbnail_url' => $cam['thumbnail_url'],
+                    'room_url' => $cam['room_url'],
+                    'embed_url' => $cam['embed_url'] ?? null,
+                    'room_subject' => $cam['room_subject'] ?? null,
+                    'country' => $cam['country'] ?? null,
                     'spoken_languages' => $cam['spoken_languages'] ?? null,
-                    'is_hd'            => $cam['is_hd'] ?? false,
-                    'is_new'           => $cam['is_new'] ?? false,
-                    'is_online'        => true,
-                    'last_seen_at'     => $now,
-                    'updated_at'       => $now,
-                    'created_at'       => $now,
+                    'is_hd' => $cam['is_hd'] ?? false,
+                    'is_new' => $cam['is_new'] ?? false,
+                    'is_online' => true,
+                    'last_seen_at' => $now,
+                    'updated_at' => $now,
+                    'created_at' => $now,
                 ];
             }, $chunk);
 
@@ -76,7 +77,7 @@ class CamSyncService
                 ['provider', 'external_id'],            // unique key
                 [                                        // columns to update on conflict
                     'username', 'gender', 'age', 'hair_color', 'body_type',
-                    'categories', 'viewers', 'thumbnail_url', 'room_url',
+                    'categories', 'viewers', 'thumbnail_url', 'room_url', 'embed_url',
                     'room_subject', 'country', 'spoken_languages',
                     'is_hd', 'is_new', 'is_online', 'last_seen_at', 'updated_at',
                 ]

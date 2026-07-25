@@ -29,6 +29,7 @@ class CamFactory extends Factory
             'viewers' => $this->faker->numberBetween(1, 5000),
             'thumbnail_url' => $this->faker->imageUrl(),
             'room_url' => 'https://chaturbate.com/'.$this->faker->userName().'/',
+            'embed_url' => null,
             'room_subject' => $this->faker->sentence(),
             'country' => $this->faker->countryCode(),
             'is_hd' => $this->faker->boolean(),
