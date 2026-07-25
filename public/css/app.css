@@ -873,3 +873,29 @@ body {
 @media (max-width: 640px) {
     .ig-feed { max-width: 100%; }
 }
+
+/* Widen into a multi-column wall as viewport grows — a single 470px
+   column centered in a 1600px page reads as broken, not minimal. */
+@media (min-width: 780px) {
+    .ig-feed { max-width: 1000px; }
+
+    .ig-posts {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        align-items: start;
+        gap: 24px;
+    }
+}
+
+@media (min-width: 1240px) {
+    .ig-feed { max-width: 1520px; }
+
+    .ig-posts {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+.ig-feed .page-heading__sub {
+    margin-left: auto;
+    margin-right: auto;
+}

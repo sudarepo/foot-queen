@@ -20,6 +20,9 @@ existing grid homepage — without touching `/` itself.
   real viewer count, hashtag caption, "Join the room" CTA button.
 - **CSS:** appended `.ig-*` classes to `public/css/app.css` (scoped under
   `.ig-feed`, doesn't affect the existing `.cam-grid` styles used by `/`).
+  Responsive: single column below 780px (mobile), 2 columns from 780px, 3
+  columns from 1240px — a fixed 470px single column looked broken/empty on
+  wide desktop viewports, so it now widens into a card wall instead.
 - Same live cam data as the homepage (no preset filter) — a presentation test,
   not a new content set.
 - Indexable (no noindex) and included in `sitemap.xml`
