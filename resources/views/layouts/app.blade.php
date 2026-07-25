@@ -23,6 +23,15 @@
     <link rel="manifest" href="{{ asset('site.webmanifest') }}">
     <meta name="theme-color" content="#0b0b0d">
 
+    <script type="application/ld+json">
+        {!! json_encode([
+            '@context' => 'https://schema.org',
+            '@type' => 'WebSite',
+            'name' => 'Foot Queen Cams',
+            'url' => url('/'),
+        ], JSON_UNESCAPED_SLASHES) !!}
+    </script>
+
     {{-- Open Graph — for social sharing --}}
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="Foot Queen Cams">
