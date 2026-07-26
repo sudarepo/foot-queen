@@ -861,6 +861,13 @@ body {
     background: #000;
 }
 
+/* Warming up in the background, not shown yet — still loads (no `loading=lazy`,
+   no display:none) so the fetch actually runs ahead of when it's needed. */
+.ig-post__live-embed--preloading {
+    opacity: 0;
+    pointer-events: none;
+}
+
 /* Sits on top of the iframe so wheel/touch-scroll bubble to the page instead
    of getting captured by the embedded (cross-origin) document. */
 .ig-post__live-embed-overlay {

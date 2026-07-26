@@ -109,7 +109,7 @@ input goes straight into that separate document, and the parent page has no
 visibility into it at all (can't listen for it, can't forward it — cross-origin
 restrictions block that entirely). The fix is a transparent overlay `<div>`
 placed on top of the iframe (`.ig-post__live-embed-overlay`, created/removed
-alongside the iframe in `mount()`/`unmountActive()` in
+alongside the iframe in `activate()`/`unmountActive()` in
 `resources/views/cams/feed.blade.php`; styled in `public/css/app.css`). Because
 the overlay is a normal element in *our* document rather than a foreign one,
 wheel and click events on it behave completely normally — scrolling bubbles up
@@ -124,6 +124,48 @@ over a playing preview and sent a wheel scroll — the page scrolled by the full
 delta (0 → 600px) exactly as it would over any other part of the page. Also
 confirmed a click there still opens the tracked `/go/` redirect (not the
 widget) by checking the resulting popup URL.
+
+**Speeding up preview loads.** Most of the latency is Chaturbate's own embed
+page — a redirect chain (`/in/` → `/gotoroom/embed/` → `/embed/{username}/`)
+landing on a page that pulls in its own JS/CSS/chat/analytics — which is
+outside our control. Two things *are* in our control, both in
+`resources/views/cams/feed.blade.php`:
+
+- **`<link rel="preconnect">` / `dns-prefetch` to chaturbate.com**, pushed into
+  `<head>` only on `/feed` (new `@stack('head')` in
+  `resources/views/layouts/app.blade.php`, matching the existing
+  `@stack('scripts')` pattern). Warms DNS/TCP/TLS setup ahead of the first
+  preview instead of paying that cost cold on first hover/scroll-into-view.
+- **One-ahead preloading**, capped deliberately at exactly one hidden iframe in
+  flight — not "preload several," which would mean multiple live video streams
+  loading in the background for cams the visitor might never look at (real,
+  wasted bandwidth/CPU cost). The script now tracks two roles instead of one:
+  `active` (visible, playing — at most one) and `preloading` (hidden via
+  `.ig-post__live-embed--preloading`, i.e. `opacity: 0; pointer-events: none;`
+  — not `display: none` and no `loading="lazy"`, both of which would stop the
+  browser from actually fetching it while hidden — at most one). `activate()`
+  reuses the matching preload's iframe instead of creating a fresh one, so
+  nothing ever double-loads.
+  - **Desktop:** `startPreload()` fires on `mouseenter`, immediately — the
+    network fetch now runs *during* the existing 250ms hover-dwell instead of
+    starting only after it. If the user leaves before the dwell completes, the
+    preload is canceled (iframe removed) — no wasted load for a quick pass-by,
+    same as before.
+  - **Mobile:** the moment a card is confirmed active (scroll-settled), the
+    *next* card in feed order starts preloading in the background — the same
+    technique TikTok/Reels use to make the next swipe feel instant. If the
+    user scrolls somewhere other than that pre-warmed next card, the stale
+    preload is discarded and a fresh one starts for wherever they actually
+    landed.
+
+Verified with a real headless browser against live data, counting actual
+network requests (not just DOM state) to be sure nothing double-loads:
+confirmed a hidden preloading iframe exists ~80ms after `mouseenter` (well
+before the 250ms dwell completes), confirmed exactly **one** request ever hits
+the iframe's entry URL for a full hover-to-active cycle, confirmed the
+preload is torn down cleanly on an early mouse-leave, and confirmed the next
+card is already preloading in the background on mobile as soon as the first
+one activates.
 
 ### 2. Click tracking (for comparing `/` vs `/feed`)
 
