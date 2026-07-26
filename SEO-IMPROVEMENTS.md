@@ -7,7 +7,10 @@ Date: 2026-07-25
 The site's SEO was underperforming: several structural issues beyond just competing
 in a crowded niche. This work fixed the quick-win issues and added an alternate,
 Instagram-style landing page (`/feed`) to test as a design variant against the
-existing grid homepage — without touching `/` itself.
+existing grid homepage. Initially built without touching `/` at all; `/` now
+also runs a real randomized 50/50 split (see §2) so the comparison is against
+actual homepage traffic — but the grid itself, and what a grid-assigned visitor
+sees, is unchanged.
 
 ## What changed
 
@@ -167,28 +170,73 @@ preload is torn down cleanly on an early mouse-leave, and confirmed the next
 card is already preloading in the background on mobile as soon as the first
 one activates.
 
-### 2. Click tracking (for comparing `/` vs `/feed`)
+### 2. A real A/B test: random split + view tracking + click tracking
 
-- **Migration:** `database/migrations/2026_07_25_184605_create_cam_click_events_table.php`
-  — new `cam_click_events` table (`cam_id`, `source_page`, timestamps).
-- **Model:** `app/Models/CamClickEvent.php`
-- Every outbound click (`/go/{cam}`) is now logged with `source_page` = `grid` or
-  `feed`, based on a `?src=` query param appended to the card links in
-  `cams/index.blade.php` and `cams/feed.blade.php`.
-- `CamController::redirectToRoom()` validates `src` against an allow-list and
-  defaults to `grid` for anything else (old links, direct hits, bots).
+Originally `/feed` was just a separate page nobody was actually sent to (not
+linked from nav or the homepage) — comparing it to `/` wasn't a real test, just
+two pages that happened to exist. This is now a proper randomized experiment.
 
-**To compare conversion:**
+**Traffic split.** `CamController::index()` (`GET /`) now splits real visitors
+50/50 between the grid and the feed variant, via a new service class:
+
+- **`app/Services/HomepageAbTest.php`** — `resolve($request)` returns the
+  variant for this visitor: honors an existing `ab_feed_variant` cookie if
+  present (so repeat visits are consistent, not re-randomized), otherwise
+  assigns one at random via `random_int(0, 1)`. `isBot($request)` excludes
+  known crawlers/bots (regex over common user-agent tokens — no dependency
+  added for this) and requests with no user-agent at all.
+- **Bots always see the grid at `/`** — no cookie, no redirect, ever. This
+  keeps `/` canonical and consistent for indexing (no cloaking risk) and keeps
+  crawler traffic out of the conversion numbers.
+- **Grid-assigned visitors:** `/` renders normally, exactly as before.
+- **Feed-assigned visitors:** `/` redirects (302) to `/feed`, preserving any
+  query filters (`redirect()->route('cams.feed', $request->query())` — *not*
+  `RedirectResponse::withQueryString()`, which doesn't actually exist as a real
+  method; it's silently swallowed by `RedirectResponse::__call()`'s
+  session-flash fallback and throws `Undefined array key 0` if called with no
+  arguments — caught by the test suite, not by chance).
+- The assignment cookie lasts 90 days (`HomepageAbTest::cookieMinutes()`).
+
+**View tracking.** New `page_view_events` table (migration
+`2026_07_26_163925_create_page_view_events_table.php`, model
+`app/Models/PageViewEvent.php`) — one row (`page` = `grid`/`feed`) per real
+page render. Logged in exactly one place per variant — inside `feed()` for
+feed views (covers both the A/B redirect *and* anyone landing on `/feed`
+directly/organically) and inside `index()` for grid views (only on the
+non-redirect branch) — specifically so a `/` → `/feed` redirect hop is never
+counted twice. Verified this holds with a real browser: visited `/` in fresh
+browser contexts and confirmed total `page_view_events` rows always matched
+total real visits, split correctly across variants, across multiple runs.
+
+**Click tracking** (unchanged from before, now paired with the above for real
+conversion rate instead of raw volume): `cam_click_events` table (`cam_id`,
+`source_page`, migration `2026_07_25_184605_create_cam_click_events_table.php`,
+model `app/Models/CamClickEvent.php`). Every outbound click (`/go/{cam}`) is
+logged with `source_page` = `grid` or `feed`, from a `?src=` query param on the
+card links in `cams/index.blade.php` and `cams/feed.blade.php`.
+`CamController::redirectToRoom()` validates `src` against an allow-list and
+defaults to `grid` for anything else (old links, direct hits, bots).
+
+**To see results, run against the production database:**
 
 ```sql
-select source_page, count(*) as clicks
-from cam_click_events
-group by source_page;
+select
+  v.page as variant,
+  v.views,
+  coalesce(c.clicks, 0) as clicks,
+  round(100.0 * coalesce(c.clicks, 0) / v.views, 2) as ctr_percent
+from
+  (select page, count(*) as views from page_view_events group by page) v
+left join
+  (select source_page, count(*) as clicks from cam_click_events group by source_page) c
+  on c.source_page = v.page;
 ```
 
-Divide by page views (not currently tracked server-side — pair with your
-analytics tool, or add a `page_view_events` table the same way, if you want a
-true CTR rather than raw click volume).
+Give it real time to accumulate — with a fresh 50/50 split just shipped,
+there's no meaningful sample yet. Re-run periodically; there's no built-in
+statistical-significance check, so treat early numbers as noisy until the
+sample size (views per variant) is large enough that the CTR gap is bigger
+than normal run-to-run variance would produce.
 
 ### 3. SEO fixes
 
@@ -219,6 +267,22 @@ true CTR rather than raw click volume).
 - `tests/Feature/ChaturbateProviderTest.php` — `embed_url` extraction from the
   API's `iframe_embed_revshare`/`iframe_embed` fields, `disable_sound=1` is
   always forced, and it's `null` when the API gives us neither field.
+- `tests/Feature/HomepageAbTestServiceTest.php` — `HomepageAbTest` in
+  isolation: bot detection (incl. the "Symfony" default user-agent
+  `Request::create()` silently fills in when none is given — worth knowing if
+  you write similar tests), existing-cookie is honored, a missing/garbage
+  cookie gets a fresh random assignment, and 200 runs of the random assignment
+  actually produce both variants (not a fixed/biased outcome).
+- `tests/Feature/HomepageAbTestTest.php` — the full HTTP-level wiring: bots
+  never get a cookie/redirect/logged view; a `grid`-cookied visitor stays and
+  logs one view; a `feed`-cookied visitor redirects and logs exactly one view
+  *only once it lands*, not at the redirect step; a first-time visitor gets a
+  new cookie; and (using `followingRedirects()`, which carries cookies across
+  the hop the same way a real browser would) a first-time visitor logs exactly
+  one page view end-to-end regardless of which variant they land on.
+- Updating `CamFeedTest`/`ExampleTest` to pin or follow the homepage's variant
+  — both previously hit `/` assuming it always renders the grid, which became
+  a 50/50 coin flip once the A/B split shipped and would have made them flaky.
 - Fixed two pre-existing local setup issues unrelated to this feature, both of
   which blocked `php artisan test` from running at all: missing `APP_KEY` and
   a never-created `database/database.sqlite`. Also fixed
