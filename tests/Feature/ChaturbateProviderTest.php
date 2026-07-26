@@ -77,4 +77,41 @@ class ChaturbateProviderTest extends TestCase
         $this->assertStringContainsString('room=foxfilms', $cams[0]['embed_url']);
         $this->assertStringContainsString('disable_sound=1', $cams[0]['embed_url']);
     }
+
+    public function test_it_merges_and_dedupes_results_across_multiple_tags(): void
+    {
+        config([
+            'cam-providers.chaturbate.affiliate_id' => 'Vg4Qi',
+            'cam-providers.chaturbate.campaign' => 'default',
+        ]);
+
+        $roomsByTag = [
+            // Same performer surfaces under both "feet" and "footfetish" —
+            // must only be counted once in the merged result.
+            'feet' => [$this->fakeRoom(['username' => 'foxfilms'])],
+            'footfetish' => [
+                $this->fakeRoom(['username' => 'foxfilms']),
+                $this->fakeRoom(['username' => 'creamycocobabe']),
+            ],
+            'toes' => [$this->fakeRoom(['username' => 'juicykendra'])],
+        ];
+
+        Http::fake(function ($request) use ($roomsByTag) {
+            parse_str(parse_url($request->url(), PHP_URL_QUERY) ?? '', $query);
+            $rooms = $roomsByTag[$query['tag'] ?? null] ?? [];
+
+            return Http::response([
+                'count' => count($rooms),
+                'results' => $rooms,
+            ]);
+        });
+
+        $cams = app(ChaturbateProvider::class)->fetchCams();
+
+        $this->assertCount(3, $cams);
+        $this->assertSame(
+            ['creamycocobabe', 'foxfilms', 'juicykendra'],
+            collect($cams)->pluck('username')->sort()->values()->all()
+        );
+    }
 }
