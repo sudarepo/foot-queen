@@ -295,6 +295,69 @@ than normal run-to-run variance would produce.
   logic grows more complex, worth adding a JS test setup rather than
   continuing to rely on manual browser verification.
 
+### 5. Admin panel (Filament) — a real place to see all of this
+
+The A/B numbers and cam data were only queryable via raw SQL. Added
+[Filament](https://filamentphp.com) v4 (`filament/filament: ^4.0`, resolved to
+`v4.12.3`) as a proper admin UI at `/admin`. This is a real dependency
+addition (~33 packages: Livewire, Alpine, Filament's own asset pipeline) —
+done deliberately, not silently; confirmed via `composer audit` that the only
+flagged advisories (guzzle/symfony, pre-existing) predate this and weren't
+introduced by it.
+
+**What's there:**
+- **`/admin/conversion-dashboard`** ("A/B Test" in the nav) — the grid-vs-feed
+  CTR from §2, as two stat cards (`app/Filament/Widgets/ConversionStatsWidget.php`),
+  the current leader highlighted green. A **"Sync cams now"** button runs
+  `cams:sync` on demand instead of waiting for the schedule
+  (`app/Filament/Pages/ConversionDashboard.php`).
+- **`/admin/cams`** — browsable/searchable/filterable cam list + detail view
+  (`app/Filament/Resources/Cams/`). Deliberately **read-only**: cam rows are
+  entirely owned by `CamSyncService` and get overwritten on every sync, so
+  there's no create/edit page — only List and View
+  (`CamResource::getPages()`; `canCreate()` returns `false`). Verified the
+  `/create` and `/{id}/edit` routes actually 404, not just that the buttons
+  are hidden.
+- Panel primary color set to the site's accent (`#e85d22`) in
+  `app/Providers/Filament/AdminPanelProvider.php`.
+
+**Access control — read this before deploying.** Filament has a deliberate
+safety default: without a `FilamentUser::canAccessPanel()` implementation on
+the User model, panel access only falls through when `APP_ENV=local` — in any
+other environment (including `production`), it's a hard 403 for everyone,
+regardless of login. This is *why* the panel worked fine in manual local
+browser testing but the first version of the test suite failed everything
+with 403 (`phpunit.xml` sets `APP_ENV=testing`) — a real gap the tests caught,
+not a testing artifact to work around. Fixed properly, not bypassed:
+`App\Models\User` now implements `FilamentUser`, and `canAccessPanel()`
+returns `true` unconditionally — there's no public registration route, so
+every row in `users` was already created deliberately (via
+`make:filament-user` or direct DB access), and is trusted by design.
+
+**No admin user was created on production, and none should be created by
+assumption.** To get in, run this yourself against production (Laravel Cloud
+console/SSH, or wherever `artisan` runs for the deployed app):
+
+```bash
+php artisan make:filament-user
+```
+
+It prompts for name/email/password interactively — nothing to hand off,
+nothing generated on your behalf. For local development only, a throwaway
+account exists in the local sqlite DB: `admin@example.test` /
+`localtest123` — local-only, never touches production, don't reuse it as a
+real credential anywhere.
+
+**Verified end-to-end with a real (headless) browser, not just route tests:**
+logged in, loaded the conversion dashboard (matched the DB counts from §2
+exactly), browsed the cams list with live thumbnails/filters, opened a cam's
+detail view, and confirmed `/admin/cams/create` and `/admin/cams/{id}/edit`
+both 404. No JS console errors on any page.
+
+- `tests/Feature/FilamentAdminPanelTest.php` — guests redirected to login;
+  an authenticated user can reach the panel, the dashboard, the cams list,
+  and a cam's detail view; create/edit routes 404 for the read-only resource.
+
 ## Not done — still worth a decision
 
 `/guys`, `/trans`, `/couples` and their sub-pages (`config/seo-pages.php`) are
@@ -304,3 +367,10 @@ nav already routes that traffic to external sites (commit `cbf6f50`). Google
 sees ~10+ indexed pages with no content, which drags on the rest of the site's
 perceived quality. Options: prune them from `config/seo-pages.php`, or add
 another provider/broaden the sync so they have real data.
+
+`composer audit` flags 22 advisories across `guzzlehttp/guzzle`,
+`guzzlehttp/psr7`, and `symfony/routing` — all pre-existing (part of Laravel's
+own HTTP client, already locked at these versions before Filament or anything
+else in this doc touched the project; confirmed via `git diff composer.lock`).
+Not introduced by this work, but worth a `composer update` sweep sometime —
+these are patch/minor-level fixes, not breaking changes.
