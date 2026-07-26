@@ -4,22 +4,47 @@ namespace App\Http\Controllers;
 
 use App\Models\Cam;
 use App\Models\CamClickEvent;
+use App\Models\PageViewEvent;
+use App\Services\HomepageAbTest;
 use App\Services\SeoPageResolver;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cookie;
 use Illuminate\View\View;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class CamController extends Controller
 {
-    public function __construct(private SeoPageResolver $seo) {}
+    public function __construct(
+        private SeoPageResolver $seo,
+        private HomepageAbTest $abTest,
+    ) {}
 
     /**
-     * Homepage — all cams, no preset filter. User can still apply their own filters.
+     * Homepage. Real (non-bot) visitors are split 50/50 between the grid and
+     * the feed variant via HomepageAbTest — the assignment is remembered by
+     * cookie so it's consistent on repeat visits. Bots always see the grid
+     * here with no cookie and no redirect, so this never affects SEO/crawling.
      */
-    public function index(Request $request): View
+    public function index(Request $request): View|RedirectResponse
     {
         $filters = $this->parseFilters($request);
+
+        if (! $this->abTest->isBot($request)) {
+            [$variant, $isNewAssignment] = $this->abTest->resolve($request);
+
+            if ($isNewAssignment) {
+                Cookie::queue(HomepageAbTest::COOKIE_NAME, $variant, $this->abTest->cookieMinutes());
+            }
+
+            if ($variant === HomepageAbTest::VARIANT_FEED) {
+                return redirect()->route('cams.feed', $request->query());
+            }
+
+            // Logged here (not in a shared spot) so a "/" → "/feed" redirect
+            // above only ever counts once, at whichever page actually renders.
+            PageViewEvent::create(['page' => HomepageAbTest::VARIANT_GRID]);
+        }
 
         return $this->renderGrid(
             filters: $filters,
@@ -65,11 +90,18 @@ class CamController extends Controller
     /**
      * Instagram-feed-style presentation of the same live cam data as the
      * homepage — a design variant served on its own URL so it can be
-     * compared against the grid layout without touching "/".
+     * compared against the grid layout without touching "/". Reachable
+     * directly (bookmarked/shared/organic) or via the A/B redirect from
+     * index() — either way, a page view is logged exactly once here, at the
+     * point content actually renders.
      */
     public function feed(Request $request): View
     {
         $filters = $this->parseFilters($request);
+
+        if (! $this->abTest->isBot($request)) {
+            PageViewEvent::create(['page' => HomepageAbTest::VARIANT_FEED]);
+        }
 
         return $this->renderGrid(
             filters: $filters,

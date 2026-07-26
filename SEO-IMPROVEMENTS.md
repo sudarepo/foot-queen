@@ -7,7 +7,10 @@ Date: 2026-07-25
 The site's SEO was underperforming: several structural issues beyond just competing
 in a crowded niche. This work fixed the quick-win issues and added an alternate,
 Instagram-style landing page (`/feed`) to test as a design variant against the
-existing grid homepage — without touching `/` itself.
+existing grid homepage. Initially built without touching `/` at all; `/` now
+also runs a real randomized 50/50 split (see §2) so the comparison is against
+actual homepage traffic — but the grid itself, and what a grid-assigned visitor
+sees, is unchanged.
 
 ## What changed
 
@@ -101,28 +104,139 @@ allowed and that "Join the room" always works regardless — honest framing
 instead of pretending to detect and fix something that can't reliably be
 detected.
 
-### 2. Click tracking (for comparing `/` vs `/feed`)
+**Fixed: scroll got trapped inside the preview on desktop.** With the cursor
+over a playing preview, scrolling the mouse wheel didn't move the page — it
+was being consumed by Chaturbate's iframe instead. This is a real limitation
+of cross-origin iframes: once the pointer is over one, wheel/touch-scroll
+input goes straight into that separate document, and the parent page has no
+visibility into it at all (can't listen for it, can't forward it — cross-origin
+restrictions block that entirely). The fix is a transparent overlay `<div>`
+placed on top of the iframe (`.ig-post__live-embed-overlay`, created/removed
+alongside the iframe in `activate()`/`unmountActive()` in
+`resources/views/cams/feed.blade.php`; styled in `public/css/app.css`). Because
+the overlay is a normal element in *our* document rather than a foreign one,
+wheel and click events on it behave completely normally — scrolling bubbles up
+and moves the page, and clicks bubble up to the card's `<a>` and go through our
+tracked `/go/{cam}?src=feed` redirect. Side effect (net positive): during the
+preview, clicks can no longer land on Chaturbate's own tip/chat controls inside
+the widget — previously a click there would route into their UI instead of our
+tracked link; now every click reliably goes through our own funnel.
 
-- **Migration:** `database/migrations/2026_07_25_184605_create_cam_click_events_table.php`
-  — new `cam_click_events` table (`cam_id`, `source_page`, timestamps).
-- **Model:** `app/Models/CamClickEvent.php`
-- Every outbound click (`/go/{cam}`) is now logged with `source_page` = `grid` or
-  `feed`, based on a `?src=` query param appended to the card links in
-  `cams/index.blade.php` and `cams/feed.blade.php`.
-- `CamController::redirectToRoom()` validates `src` against an allow-list and
-  defaults to `grid` for anything else (old links, direct hits, bots).
+Verified with a real headless browser against live data: positioned the cursor
+over a playing preview and sent a wheel scroll — the page scrolled by the full
+delta (0 → 600px) exactly as it would over any other part of the page. Also
+confirmed a click there still opens the tracked `/go/` redirect (not the
+widget) by checking the resulting popup URL.
 
-**To compare conversion:**
+**Speeding up preview loads.** Most of the latency is Chaturbate's own embed
+page — a redirect chain (`/in/` → `/gotoroom/embed/` → `/embed/{username}/`)
+landing on a page that pulls in its own JS/CSS/chat/analytics — which is
+outside our control. Two things *are* in our control, both in
+`resources/views/cams/feed.blade.php`:
+
+- **`<link rel="preconnect">` / `dns-prefetch` to chaturbate.com**, pushed into
+  `<head>` only on `/feed` (new `@stack('head')` in
+  `resources/views/layouts/app.blade.php`, matching the existing
+  `@stack('scripts')` pattern). Warms DNS/TCP/TLS setup ahead of the first
+  preview instead of paying that cost cold on first hover/scroll-into-view.
+- **One-ahead preloading**, capped deliberately at exactly one hidden iframe in
+  flight — not "preload several," which would mean multiple live video streams
+  loading in the background for cams the visitor might never look at (real,
+  wasted bandwidth/CPU cost). The script now tracks two roles instead of one:
+  `active` (visible, playing — at most one) and `preloading` (hidden via
+  `.ig-post__live-embed--preloading`, i.e. `opacity: 0; pointer-events: none;`
+  — not `display: none` and no `loading="lazy"`, both of which would stop the
+  browser from actually fetching it while hidden — at most one). `activate()`
+  reuses the matching preload's iframe instead of creating a fresh one, so
+  nothing ever double-loads.
+  - **Desktop:** `startPreload()` fires on `mouseenter`, immediately — the
+    network fetch now runs *during* the existing 250ms hover-dwell instead of
+    starting only after it. If the user leaves before the dwell completes, the
+    preload is canceled (iframe removed) — no wasted load for a quick pass-by,
+    same as before.
+  - **Mobile:** the moment a card is confirmed active (scroll-settled), the
+    *next* card in feed order starts preloading in the background — the same
+    technique TikTok/Reels use to make the next swipe feel instant. If the
+    user scrolls somewhere other than that pre-warmed next card, the stale
+    preload is discarded and a fresh one starts for wherever they actually
+    landed.
+
+Verified with a real headless browser against live data, counting actual
+network requests (not just DOM state) to be sure nothing double-loads:
+confirmed a hidden preloading iframe exists ~80ms after `mouseenter` (well
+before the 250ms dwell completes), confirmed exactly **one** request ever hits
+the iframe's entry URL for a full hover-to-active cycle, confirmed the
+preload is torn down cleanly on an early mouse-leave, and confirmed the next
+card is already preloading in the background on mobile as soon as the first
+one activates.
+
+### 2. A real A/B test: random split + view tracking + click tracking
+
+Originally `/feed` was just a separate page nobody was actually sent to (not
+linked from nav or the homepage) — comparing it to `/` wasn't a real test, just
+two pages that happened to exist. This is now a proper randomized experiment.
+
+**Traffic split.** `CamController::index()` (`GET /`) now splits real visitors
+50/50 between the grid and the feed variant, via a new service class:
+
+- **`app/Services/HomepageAbTest.php`** — `resolve($request)` returns the
+  variant for this visitor: honors an existing `ab_feed_variant` cookie if
+  present (so repeat visits are consistent, not re-randomized), otherwise
+  assigns one at random via `random_int(0, 1)`. `isBot($request)` excludes
+  known crawlers/bots (regex over common user-agent tokens — no dependency
+  added for this) and requests with no user-agent at all.
+- **Bots always see the grid at `/`** — no cookie, no redirect, ever. This
+  keeps `/` canonical and consistent for indexing (no cloaking risk) and keeps
+  crawler traffic out of the conversion numbers.
+- **Grid-assigned visitors:** `/` renders normally, exactly as before.
+- **Feed-assigned visitors:** `/` redirects (302) to `/feed`, preserving any
+  query filters (`redirect()->route('cams.feed', $request->query())` — *not*
+  `RedirectResponse::withQueryString()`, which doesn't actually exist as a real
+  method; it's silently swallowed by `RedirectResponse::__call()`'s
+  session-flash fallback and throws `Undefined array key 0` if called with no
+  arguments — caught by the test suite, not by chance).
+- The assignment cookie lasts 90 days (`HomepageAbTest::cookieMinutes()`).
+
+**View tracking.** New `page_view_events` table (migration
+`2026_07_26_163925_create_page_view_events_table.php`, model
+`app/Models/PageViewEvent.php`) — one row (`page` = `grid`/`feed`) per real
+page render. Logged in exactly one place per variant — inside `feed()` for
+feed views (covers both the A/B redirect *and* anyone landing on `/feed`
+directly/organically) and inside `index()` for grid views (only on the
+non-redirect branch) — specifically so a `/` → `/feed` redirect hop is never
+counted twice. Verified this holds with a real browser: visited `/` in fresh
+browser contexts and confirmed total `page_view_events` rows always matched
+total real visits, split correctly across variants, across multiple runs.
+
+**Click tracking** (unchanged from before, now paired with the above for real
+conversion rate instead of raw volume): `cam_click_events` table (`cam_id`,
+`source_page`, migration `2026_07_25_184605_create_cam_click_events_table.php`,
+model `app/Models/CamClickEvent.php`). Every outbound click (`/go/{cam}`) is
+logged with `source_page` = `grid` or `feed`, from a `?src=` query param on the
+card links in `cams/index.blade.php` and `cams/feed.blade.php`.
+`CamController::redirectToRoom()` validates `src` against an allow-list and
+defaults to `grid` for anything else (old links, direct hits, bots).
+
+**To see results, run against the production database:**
 
 ```sql
-select source_page, count(*) as clicks
-from cam_click_events
-group by source_page;
+select
+  v.page as variant,
+  v.views,
+  coalesce(c.clicks, 0) as clicks,
+  round(100.0 * coalesce(c.clicks, 0) / v.views, 2) as ctr_percent
+from
+  (select page, count(*) as views from page_view_events group by page) v
+left join
+  (select source_page, count(*) as clicks from cam_click_events group by source_page) c
+  on c.source_page = v.page;
 ```
 
-Divide by page views (not currently tracked server-side — pair with your
-analytics tool, or add a `page_view_events` table the same way, if you want a
-true CTR rather than raw click volume).
+Give it real time to accumulate — with a fresh 50/50 split just shipped,
+there's no meaningful sample yet. Re-run periodically; there's no built-in
+statistical-significance check, so treat early numbers as noisy until the
+sample size (views per variant) is large enough that the CTR gap is bigger
+than normal run-to-run variance would produce.
 
 ### 3. SEO fixes
 
@@ -153,6 +267,22 @@ true CTR rather than raw click volume).
 - `tests/Feature/ChaturbateProviderTest.php` — `embed_url` extraction from the
   API's `iframe_embed_revshare`/`iframe_embed` fields, `disable_sound=1` is
   always forced, and it's `null` when the API gives us neither field.
+- `tests/Feature/HomepageAbTestServiceTest.php` — `HomepageAbTest` in
+  isolation: bot detection (incl. the "Symfony" default user-agent
+  `Request::create()` silently fills in when none is given — worth knowing if
+  you write similar tests), existing-cookie is honored, a missing/garbage
+  cookie gets a fresh random assignment, and 200 runs of the random assignment
+  actually produce both variants (not a fixed/biased outcome).
+- `tests/Feature/HomepageAbTestTest.php` — the full HTTP-level wiring: bots
+  never get a cookie/redirect/logged view; a `grid`-cookied visitor stays and
+  logs one view; a `feed`-cookied visitor redirects and logs exactly one view
+  *only once it lands*, not at the redirect step; a first-time visitor gets a
+  new cookie; and (using `followingRedirects()`, which carries cookies across
+  the hop the same way a real browser would) a first-time visitor logs exactly
+  one page view end-to-end regardless of which variant they land on.
+- Updating `CamFeedTest`/`ExampleTest` to pin or follow the homepage's variant
+  — both previously hit `/` assuming it always renders the grid, which became
+  a 50/50 coin flip once the A/B split shipped and would have made them flaky.
 - Fixed two pre-existing local setup issues unrelated to this feature, both of
   which blocked `php artisan test` from running at all: missing `APP_KEY` and
   a never-created `database/database.sqlite`. Also fixed
@@ -165,6 +295,69 @@ true CTR rather than raw click volume).
   logic grows more complex, worth adding a JS test setup rather than
   continuing to rely on manual browser verification.
 
+### 5. Admin panel (Filament) — a real place to see all of this
+
+The A/B numbers and cam data were only queryable via raw SQL. Added
+[Filament](https://filamentphp.com) v4 (`filament/filament: ^4.0`, resolved to
+`v4.12.3`) as a proper admin UI at `/admin`. This is a real dependency
+addition (~33 packages: Livewire, Alpine, Filament's own asset pipeline) —
+done deliberately, not silently; confirmed via `composer audit` that the only
+flagged advisories (guzzle/symfony, pre-existing) predate this and weren't
+introduced by it.
+
+**What's there:**
+- **`/admin/conversion-dashboard`** ("A/B Test" in the nav) — the grid-vs-feed
+  CTR from §2, as two stat cards (`app/Filament/Widgets/ConversionStatsWidget.php`),
+  the current leader highlighted green. A **"Sync cams now"** button runs
+  `cams:sync` on demand instead of waiting for the schedule
+  (`app/Filament/Pages/ConversionDashboard.php`).
+- **`/admin/cams`** — browsable/searchable/filterable cam list + detail view
+  (`app/Filament/Resources/Cams/`). Deliberately **read-only**: cam rows are
+  entirely owned by `CamSyncService` and get overwritten on every sync, so
+  there's no create/edit page — only List and View
+  (`CamResource::getPages()`; `canCreate()` returns `false`). Verified the
+  `/create` and `/{id}/edit` routes actually 404, not just that the buttons
+  are hidden.
+- Panel primary color set to the site's accent (`#e85d22`) in
+  `app/Providers/Filament/AdminPanelProvider.php`.
+
+**Access control — read this before deploying.** Filament has a deliberate
+safety default: without a `FilamentUser::canAccessPanel()` implementation on
+the User model, panel access only falls through when `APP_ENV=local` — in any
+other environment (including `production`), it's a hard 403 for everyone,
+regardless of login. This is *why* the panel worked fine in manual local
+browser testing but the first version of the test suite failed everything
+with 403 (`phpunit.xml` sets `APP_ENV=testing`) — a real gap the tests caught,
+not a testing artifact to work around. Fixed properly, not bypassed:
+`App\Models\User` now implements `FilamentUser`, and `canAccessPanel()`
+returns `true` unconditionally — there's no public registration route, so
+every row in `users` was already created deliberately (via
+`make:filament-user` or direct DB access), and is trusted by design.
+
+**No admin user was created on production, and none should be created by
+assumption.** To get in, run this yourself against production (Laravel Cloud
+console/SSH, or wherever `artisan` runs for the deployed app):
+
+```bash
+php artisan make:filament-user
+```
+
+It prompts for name/email/password interactively — nothing to hand off,
+nothing generated on your behalf. For local development only, a throwaway
+account exists in the local sqlite DB: `admin@example.test` /
+`localtest123` — local-only, never touches production, don't reuse it as a
+real credential anywhere.
+
+**Verified end-to-end with a real (headless) browser, not just route tests:**
+logged in, loaded the conversion dashboard (matched the DB counts from §2
+exactly), browsed the cams list with live thumbnails/filters, opened a cam's
+detail view, and confirmed `/admin/cams/create` and `/admin/cams/{id}/edit`
+both 404. No JS console errors on any page.
+
+- `tests/Feature/FilamentAdminPanelTest.php` — guests redirected to login;
+  an authenticated user can reach the panel, the dashboard, the cams list,
+  and a cam's detail view; create/edit routes 404 for the read-only resource.
+
 ## Not done — still worth a decision
 
 `/guys`, `/trans`, `/couples` and their sub-pages (`config/seo-pages.php`) are
@@ -174,3 +367,10 @@ nav already routes that traffic to external sites (commit `cbf6f50`). Google
 sees ~10+ indexed pages with no content, which drags on the rest of the site's
 perceived quality. Options: prune them from `config/seo-pages.php`, or add
 another provider/broaden the sync so they have real data.
+
+`composer audit` flags 22 advisories across `guzzlehttp/guzzle`,
+`guzzlehttp/psr7`, and `symfony/routing` — all pre-existing (part of Laravel's
+own HTTP client, already locked at these versions before Filament or anything
+else in this doc touched the project; confirmed via `git diff composer.lock`).
+Not introduced by this work, but worth a `composer update` sweep sometime —
+these are patch/minor-level fixes, not breaking changes.

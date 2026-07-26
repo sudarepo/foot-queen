@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Cam;
+use App\Services\HomepageAbTest;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -14,7 +15,9 @@ class CamFeedTest extends TestCase
     {
         Cam::factory()->count(3)->create();
 
-        $response = $this->get('/');
+        // Pinned to the grid variant — the 50/50 homepage A/B split itself is
+        // covered by HomepageAbTestTest; this test is about the grid render path.
+        $response = $this->withCookie(HomepageAbTest::COOKIE_NAME, 'grid')->get('/');
 
         $response->assertStatus(200);
         $response->assertViewIs('cams.index');

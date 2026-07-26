@@ -14,7 +14,9 @@ class ExampleTest extends TestCase
      */
     public function test_the_application_returns_a_successful_response(): void
     {
-        $response = $this->get('/');
+        // followingRedirects() because "/" now A/B-splits real visitors between
+        // the grid and a redirect to "/feed" — this just checks the app boots.
+        $response = $this->followingRedirects()->get('/');
 
         $response->assertStatus(200);
     }
