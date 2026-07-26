@@ -101,6 +101,30 @@ allowed and that "Join the room" always works regardless — honest framing
 instead of pretending to detect and fix something that can't reliably be
 detected.
 
+**Fixed: scroll got trapped inside the preview on desktop.** With the cursor
+over a playing preview, scrolling the mouse wheel didn't move the page — it
+was being consumed by Chaturbate's iframe instead. This is a real limitation
+of cross-origin iframes: once the pointer is over one, wheel/touch-scroll
+input goes straight into that separate document, and the parent page has no
+visibility into it at all (can't listen for it, can't forward it — cross-origin
+restrictions block that entirely). The fix is a transparent overlay `<div>`
+placed on top of the iframe (`.ig-post__live-embed-overlay`, created/removed
+alongside the iframe in `mount()`/`unmountActive()` in
+`resources/views/cams/feed.blade.php`; styled in `public/css/app.css`). Because
+the overlay is a normal element in *our* document rather than a foreign one,
+wheel and click events on it behave completely normally — scrolling bubbles up
+and moves the page, and clicks bubble up to the card's `<a>` and go through our
+tracked `/go/{cam}?src=feed` redirect. Side effect (net positive): during the
+preview, clicks can no longer land on Chaturbate's own tip/chat controls inside
+the widget — previously a click there would route into their UI instead of our
+tracked link; now every click reliably goes through our own funnel.
+
+Verified with a real headless browser against live data: positioned the cursor
+over a playing preview and sent a wheel scroll — the page scrolled by the full
+delta (0 → 600px) exactly as it would over any other part of the page. Also
+confirmed a click there still opens the tracked `/go/` redirect (not the
+widget) by checking the resulting popup URL.
+
 ### 2. Click tracking (for comparing `/` vs `/feed`)
 
 - **Migration:** `database/migrations/2026_07_25_184605_create_cam_click_events_table.php`

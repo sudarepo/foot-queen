@@ -106,7 +106,7 @@
             var cards = Array.prototype.slice.call(document.querySelectorAll('.ig-post__media[data-embed-url]'));
             if (!cards.length) return;
 
-            var active = null; // { el, iframe }
+            var active = null; // { el, iframe, overlay }
 
             function mount(el) {
                 if (active && active.el === el) return;
@@ -120,17 +120,29 @@
                 iframe.setAttribute('allow', 'autoplay');
                 iframe.setAttribute('referrerpolicy', 'no-referrer');
                 el.appendChild(iframe);
+
+                // A cross-origin iframe swallows wheel/touch-scroll input once the
+                // cursor is over it — the parent page has no visibility into that
+                // separate document, so it can't forward the scroll. A transparent
+                // overlay in OUR document sits on top instead: normal DOM element,
+                // so scroll/click bubble up normally (scrolls the page, clicks
+                // still activate the card's link) as if the iframe weren't there.
+                var overlay = document.createElement('div');
+                overlay.className = 'ig-post__live-embed-overlay';
+                el.appendChild(overlay);
+
                 el.classList.add('ig-post__media--live');
 
                 var post = el.closest('.ig-post');
                 if (post) post.classList.add('ig-post--active');
 
-                active = { el: el, iframe: iframe };
+                active = { el: el, iframe: iframe, overlay: overlay };
             }
 
             function unmountActive() {
                 if (!active) return;
                 active.iframe.remove();
+                active.overlay.remove();
                 active.el.classList.remove('ig-post__media--live');
                 var post = active.el.closest('.ig-post');
                 if (post) post.classList.remove('ig-post--active');

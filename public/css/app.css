@@ -861,6 +861,16 @@ body {
     background: #000;
 }
 
+/* Sits on top of the iframe so wheel/touch-scroll bubble to the page instead
+   of getting captured by the embedded (cross-origin) document. */
+.ig-post__live-embed-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    background: transparent;
+    cursor: pointer;
+}
+
 .ig-post__actions {
     display: flex;
     align-items: center;
