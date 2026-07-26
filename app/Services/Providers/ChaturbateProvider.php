@@ -24,6 +24,20 @@ class ChaturbateProvider implements CamProviderInterface
 
     private const PAGE_LIMIT = 500;   // API max
 
+    /**
+     * Feet-related tags to search. The API only accepts one `tag` per
+     * request (comma-separating them is rejected outright — "Enter a valid
+     * value"), so each is fetched separately and merged.
+     *
+     * 'feet' alone already captures the vast majority of relevant content.
+     * Checked empirically against the live API (2026-07-26, ~420 online
+     * 'feet' results at the time): 'soles' added zero performers not already
+     * covered by 'feet'; 'footfetish' and 'toes' each added only ~2;
+     * 'feetworship' and 'pedicure' returned zero results. Included the two
+     * that showed any signal; skipped the two that showed none.
+     */
+    private const TAGS = ['feet', 'footfetish', 'toes'];
+
     public function getName(): string
     {
         return 'chaturbate';
@@ -40,6 +54,26 @@ class ChaturbateProvider implements CamProviderInterface
 
         $campaign = config('cam-providers.chaturbate.campaign', 'default');
 
+        // Keyed by username so a performer surfacing under more than one tag
+        // isn't processed twice.
+        $byUsername = [];
+
+        foreach (self::TAGS as $tag) {
+            foreach ($this->fetchTag($tag, $wm, $campaign) as $cam) {
+                $byUsername[$cam['external_id']] = $cam;
+            }
+        }
+
+        return array_values($byUsername);
+    }
+
+    /**
+     * Paginate through every online room for a single tag.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function fetchTag(string $tag, string $wm, string $campaign): array
+    {
         $all = [];
         $offset = 0;
         $total = null;
@@ -54,11 +88,12 @@ class ChaturbateProvider implements CamProviderInterface
                 'limit' => self::PAGE_LIMIT,
                 'offset' => $offset,
                 'gender' => 'f',
-                'tag' => 'feet',
+                'tag' => $tag,
             ]);
 
             if ($response->failed()) {
                 Log::error('Chaturbate API failed', [
+                    'tag' => $tag,
                     'status' => $response->status(),
                     'body' => substr($response->body(), 0, 500),
                 ]);
@@ -89,7 +124,10 @@ class ChaturbateProvider implements CamProviderInterface
 
             // Safety cap — don't loop forever if the API misbehaves.
             if ($offset > 20000) {
-                Log::warning('Chaturbate pagination safety cap hit at offset '.$offset);
+                Log::warning('Chaturbate pagination safety cap hit', [
+                    'tag' => $tag,
+                    'offset' => $offset,
+                ]);
                 break;
             }
         }

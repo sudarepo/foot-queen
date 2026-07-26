@@ -358,6 +358,34 @@ both 404. No JS console errors on any page.
   an authenticated user can reach the panel, the dashboard, the cams list,
   and a cam's detail view; create/edit routes 404 for the read-only resource.
 
+### 6. Chaturbate sync: broader foot-content coverage via multiple tags
+
+`ChaturbateProvider` already filtered the sync to `gender=f&tag=feet` (since
+commit `aaf3f15`) — the site's whole premise is women's feet, so this was
+already the right filter, not a gap. Checked whether it was missing anything:
+the API only accepts one `tag` per request (comma-separating them is rejected
+outright — `{"errors":{"tag":[{"message":"Enter a valid value."}]}}`), so
+broadening means separate paginated requests per tag, merged together.
+
+Checked live against the real API before changing anything (2026-07-26,
+~420 online results for `feet` at the time): `soles` added zero performers
+not already covered by `feet`; `footfetish` and `toes` each added only ~2;
+`feetworship` and `pedicure` returned zero results outright. Reported these
+numbers before implementing — added the two tags that showed any signal
+(`footfetish`, `toes`), skipped the two that showed none.
+
+`fetchCams()` now loops `ChaturbateProvider::TAGS = ['feet', 'footfetish',
+'toes']`, paginating each tag independently via the extracted `fetchTag()`
+method, and merges results into an array keyed by username so a performer
+tagged both ways (or fetched twice due to pagination) is only processed
+once — verified with a live sync afterward (`juicykendra`, one of the
+performers only reachable via `toes`, showed up in the `cams` table with
+real synced data).
+
+- `tests/Feature/ChaturbateProviderTest.php` — added a test that fakes
+  different rooms per tag (including the same username under two tags) and
+  asserts the merged result contains each performer exactly once.
+
 ## Not done — still worth a decision
 
 `/guys`, `/trans`, `/couples` and their sub-pages (`config/seo-pages.php`) are
