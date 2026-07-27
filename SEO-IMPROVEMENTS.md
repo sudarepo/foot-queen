@@ -386,6 +386,67 @@ real synced data).
   different rooms per tag (including the same username under two tags) and
   asserts the merged result contains each performer exactly once.
 
+### 7. Admin panel: date-filtered stats, in-app explanations, admin clicks tracked
+
+Three follow-ups after actually using the dashboard from §5:
+
+**Date range filter — fixes a real reporting bug, not just a nice-to-have.**
+Before the 50/50 split shipped (2026-07-26, see `HomepageAbTest::LAUNCHED_AT`),
+"/" had no A/B logic at all — every visit was "grid" by definition, since
+nothing sent anyone to "/feed" yet. All-time totals on the dashboard were
+mixing that pre-launch period in with real post-launch data, which is exactly
+what made grid look artificially ahead. `ConversionDashboard` now has a
+`filtersForm()` (Filament's dashboard-filters pattern —
+`Filament\Pages\Dashboard\Concerns\HasFiltersForm`, adapted here for a plain
+`Page` rather than the built-in `Dashboard` class, so
+`getFiltersFormContentComponent()` had to be defined by hand — it only exists
+on `Dashboard` itself, not the trait) with `from`/`until` date pickers.
+`from` defaults to `LAUNCHED_AT`; `until` defaults to blank ("up to now").
+`ConversionStatsWidget` reads the selected range via
+`InteractsWithPageFilters`'s `$pageFilters` (Livewire prop, reactive — the
+stats re-render live as the dates change) and scopes both the
+`page_view_events` and `cam_click_events` queries by it, so clicks and views
+are always filtered together, never one without the other.
+
+Along the way: Filament widgets lazy-load by default
+(`Filament\Support\Concerns\CanBeLazy`, `$isLazy = true`) — a follow-up AJAX
+round-trip after the initial page load, invisible in a browser but meaning
+the stats never appeared in a plain HTTP test response at all. Set
+`$isLazy = false` on `ConversionStatsWidget`: these are cheap aggregate
+counts on a low-traffic admin page, not worth the pop-in delay, and it made
+the behavior actually testable.
+
+**In-app explanations.** A collapsible "What these numbers mean" section on
+the dashboard now spells out what a View, a Click, and CTR actually are, plus
+an explicit warning about the pre-launch skew and why the date filter
+defaults where it does — so the answer to "what is a view" lives next to the
+numbers themselves, not only in this file.
+
+**Admin outbound clicks are now tracked too.** The Cam resource's "Room URL"
+was previously just copyable text, not a real link — clicking through from
+the admin panel wasn't possible, let alone tracked. Added a "Visit room"
+action (table row action in `CamsTable.php`, header action on `ViewCam.php`)
+that opens the real room in a new tab via the *same* tracked
+`/go/{cam}` redirect the public pages use
+(`route('cams.redirect', [$record, 'src' => 'admin'])`), reusing the existing
+click-logging path rather than duplicating it. `CamController::redirectToRoom()`'s
+source allow-list now includes `'admin'` alongside `'grid'`/`'feed'`.
+
+Verified with a real browser end-to-end: confirmed the "From" date field
+actually renders `Jul 26, 2026` (not just that the constant is correct in
+PHP), confirmed the explanation section text renders, and clicked the real
+"Visit room" link — it opened `chaturbate.com` in a new tab, and the click
+showed up in `cam_click_events` with `source_page = 'admin'` immediately
+after.
+
+- `tests/Feature/FilamentAdminPanelTest.php` — the cams list and cam view
+  page both link to the tracked visit-room URL; the dashboard explanation
+  text renders; the default date filter excludes a pre-launch page view from
+  the stats (seeded a view dated `2026-01-01` alongside one dated "now,"
+  asserted only the in-range one is counted).
+- `tests/Feature/CamClickTrackingTest.php` — clicking through with `src=admin`
+  logs `source_page = 'admin'`.
+
 ## Not done — still worth a decision
 
 `/guys`, `/trans`, `/couples` and their sub-pages (`config/seo-pages.php`) are

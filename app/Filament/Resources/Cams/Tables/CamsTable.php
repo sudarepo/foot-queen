@@ -2,7 +2,9 @@
 
 namespace App\Filament\Resources\Cams\Tables;
 
+use Filament\Actions\Action;
 use Filament\Actions\ViewAction;
+use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\TextColumn;
@@ -68,6 +70,12 @@ class CamsTable
             ])
             ->recordActions([
                 ViewAction::make(),
+                Action::make('visitRoom')
+                    ->label('Visit room')
+                    ->icon(Heroicon::OutlinedArrowTopRightOnSquare)
+                    ->color('gray')
+                    ->url(fn ($record) => route('cams.redirect', [$record, 'src' => 'admin']))
+                    ->openUrlInNewTab(),
             ]);
     }
 }
