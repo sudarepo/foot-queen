@@ -116,8 +116,11 @@ class CamController extends Controller
 
     public function redirectToRoom(Request $request, Cam $cam): RedirectResponse
     {
+        // 'admin' covers the "Visit Room" action in the Filament cam
+        // resource, so those outbound clicks are tracked too, not just the
+        // public grid/feed pages.
         $source = $request->query('src');
-        $source = in_array($source, ['grid', 'feed'], strict: true) ? $source : 'grid';
+        $source = in_array($source, ['grid', 'feed', 'admin'], strict: true) ? $source : 'grid';
 
         CamClickEvent::create([
             'cam_id' => $cam->id,

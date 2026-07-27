@@ -48,6 +48,19 @@ class CamClickTrackingTest extends TestCase
         ]);
     }
 
+    public function test_clicking_through_from_the_admin_panel_logs_its_source(): void
+    {
+        $cam = Cam::factory()->create();
+
+        $response = $this->get(route('cams.redirect', [$cam, 'src' => 'admin']));
+
+        $response->assertRedirect($cam->room_url);
+        $this->assertDatabaseHas('cam_click_events', [
+            'cam_id' => $cam->id,
+            'source_page' => 'admin',
+        ]);
+    }
+
     public function test_click_event_belongs_to_its_cam(): void
     {
         $cam = Cam::factory()->create();

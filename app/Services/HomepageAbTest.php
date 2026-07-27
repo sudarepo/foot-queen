@@ -23,6 +23,15 @@ class HomepageAbTest
     private const COOKIE_MINUTES = 60 * 24 * 90; // 90 days
 
     /**
+     * The date this 50/50 split first shipped (commit aa28dbb). Page views
+     * before this are almost entirely 'grid' — "/feed" had no traffic before
+     * this deployed, since nothing linked to it yet. The admin conversion
+     * dashboard defaults its date filter to this, so the numbers shown are
+     * fair by default instead of skewed by the pre-launch period.
+     */
+    public const LAUNCHED_AT = '2026-07-26';
+
+    /**
      * Loose but low-maintenance bot/crawler detection via user-agent — good
      * enough to keep search crawlers and common scrapers/monitors out of the
      * experiment without adding a dependency for it.
