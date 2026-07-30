@@ -68,4 +68,21 @@ class CamClickTrackingTest extends TestCase
 
         $this->assertTrue($event->cam->is($cam));
     }
+
+    public function test_bot_clicks_still_redirect_but_are_not_logged(): void
+    {
+        $cam = Cam::factory()->create();
+        $botUserAgent = 'Mozilla/5.0 (compatible; AhrefsBot/7.0; +http://ahrefs.com/robot/)';
+
+        $response = $this->withHeader('User-Agent', $botUserAgent)
+            ->get(route('cams.redirect', [$cam, 'src' => 'grid']));
+
+        // The redirect itself is never blocked — only the click log is
+        // bot-gated. This is what fixes CTR being inflated past 100%: a
+        // crawler following /go/ links (robots.txt disallows it, but not
+        // everything respects that) was logging a click with no matching
+        // filtered view to divide it against.
+        $response->assertRedirect($cam->room_url);
+        $this->assertSame(0, CamClickEvent::count());
+    }
 }

@@ -116,16 +116,26 @@ class CamController extends Controller
 
     public function redirectToRoom(Request $request, Cam $cam): RedirectResponse
     {
-        // 'admin' covers the "Visit Room" action in the Filament cam
-        // resource, so those outbound clicks are tracked too, not just the
-        // public grid/feed pages.
-        $source = $request->query('src');
-        $source = in_array($source, ['grid', 'feed', 'admin'], strict: true) ? $source : 'grid';
+        // The redirect itself always happens, bot or not — no reason to block
+        // it. Only the click *log* is bot-gated, to match how page views are
+        // filtered (index()/feed() above). Without this, a crawler that
+        // follows /go/ links (robots.txt disallows it, but not everything
+        // respects that) inflates click counts with no matching filtered
+        // view, which is exactly what produced a 1200%+ CTR on grid in
+        // practice — clicks with no bot filter at all, divided by views that
+        // were already filtered.
+        if (! $this->abTest->isBot($request)) {
+            // 'admin' covers the "Visit Room" action in the Filament cam
+            // resource, so those outbound clicks are tracked too, not just
+            // the public grid/feed pages.
+            $source = $request->query('src');
+            $source = in_array($source, ['grid', 'feed', 'admin'], strict: true) ? $source : 'grid';
 
-        CamClickEvent::create([
-            'cam_id' => $cam->id,
-            'source_page' => $source,
-        ]);
+            CamClickEvent::create([
+                'cam_id' => $cam->id,
+                'source_page' => $source,
+            ]);
+        }
 
         return redirect()->away($cam->room_url);
     }
