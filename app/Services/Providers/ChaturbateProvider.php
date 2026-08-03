@@ -222,8 +222,14 @@ class ChaturbateProvider implements CamProviderInterface
      * the actual video-only page. Two cross-origin redirects inside an
      * iframe is exactly what ad blockers and browser privacy modes tend to
      * kill. We keep the same tracking query params (tour/campaign/track)
-     * but target `/embed/{username}/` directly, and force `disable_sound=1`
-     * so hover previews don't autoplay audio.
+     * but target `/embed/{username}/` directly.
+     *
+     * We hit it via cbxyz.com rather than chaturbate.com: it's the same
+     * Chaturbate-owned endpoint (whitelisted in chaturbate.com's own CSP
+     * frame-src) one single 302 away from `chaturbate.com/embed/...`, but a
+     * domain-based ad-block rule matching "chaturbate.com" in the initial
+     * iframe src won't catch it. Also force `disable_sound=1` so hover
+     * previews don't autoplay audio.
      */
     private function extractEmbedUrl(array $room): ?string
     {
@@ -246,6 +252,6 @@ class ChaturbateProvider implements CamProviderInterface
             return null;
         }
 
-        return "https://chaturbate.com/embed/{$username}/?".http_build_query($query);
+        return "https://cbxyz.com/embed/{$username}/?".http_build_query($query);
     }
 }

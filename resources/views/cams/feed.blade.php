@@ -6,6 +6,8 @@
     {{-- Warm the connection ahead of the first preview — skips DNS/TCP/TLS
          setup (can be several hundred ms) on the request that actually
          matters instead of paying it cold on first hover/scroll-into-view. --}}
+    <link rel="preconnect" href="https://cbxyz.com">
+    <link rel="dns-prefetch" href="https://cbxyz.com">
     <link rel="preconnect" href="https://chaturbate.com">
     <link rel="dns-prefetch" href="https://chaturbate.com">
 @endpush
