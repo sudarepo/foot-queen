@@ -48,7 +48,7 @@ class ChaturbateProviderTest extends TestCase
         $embedUrl = $cams[0]['embed_url'];
 
         $this->assertNotNull($embedUrl);
-        $this->assertStringStartsWith('https://chaturbate.com/in/', $embedUrl);
+        $this->assertStringStartsWith('https://chaturbate.com/embed/foxfilms/', $embedUrl);
         $this->assertStringContainsString('room=foxfilms', $embedUrl);
         $this->assertStringContainsString('disable_sound=1', $embedUrl);
     }

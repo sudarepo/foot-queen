@@ -215,8 +215,15 @@ class ChaturbateProvider implements CamProviderInterface
      * Chaturbate's API returns ready-made `<iframe>` embed snippets for
      * affiliates — `iframe_embed_revshare` is the revenue-share-tracked one,
      * meant for exactly this: embedding the live room on our own pages.
-     * We pull the `src` out of it and force `disable_sound=1` so hover
-     * previews don't autoplay audio.
+     *
+     * That snippet's `src` points at `/in/?tour=...&room=...`, a top-level
+     * "tour" redirect meant for outbound links: it 302s through
+     * `/gotoroom/embed/` before finally landing on `/embed/{username}/`,
+     * the actual video-only page. Two cross-origin redirects inside an
+     * iframe is exactly what ad blockers and browser privacy modes tend to
+     * kill. We keep the same tracking query params (tour/campaign/track)
+     * but target `/embed/{username}/` directly, and force `disable_sound=1`
+     * so hover previews don't autoplay audio.
      */
     private function extractEmbedUrl(array $room): ?string
     {
@@ -234,8 +241,11 @@ class ChaturbateProvider implements CamProviderInterface
         parse_str($parts['query'] ?? '', $query);
         $query['disable_sound'] = 1;
 
-        $path = $parts['path'] ?? '/';
+        $username = $query['room'] ?? $room['username'] ?? null;
+        if (empty($username)) {
+            return null;
+        }
 
-        return "https://{$parts['host']}{$path}?".http_build_query($query);
+        return "https://chaturbate.com/embed/{$username}/?".http_build_query($query);
     }
 }
