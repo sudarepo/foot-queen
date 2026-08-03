@@ -116,6 +116,12 @@ class CamController extends Controller
 
     public function redirectToRoom(Request $request, Cam $cam): RedirectResponse
     {
+        // 'admin' covers the "Visit Room" action in the Filament cam
+        // resource, so those outbound clicks are tracked too, not just
+        // the public grid/feed pages.
+        $source = $request->query('src');
+        $source = in_array($source, ['grid', 'feed', 'admin'], strict: true) ? $source : 'grid';
+
         // The redirect itself always happens, bot or not — no reason to block
         // it. Only the click *log* is bot-gated, to match how page views are
         // filtered (index()/feed() above). Without this, a crawler that
@@ -125,19 +131,39 @@ class CamController extends Controller
         // practice — clicks with no bot filter at all, divided by views that
         // were already filtered.
         if (! $this->abTest->isBot($request)) {
-            // 'admin' covers the "Visit Room" action in the Filament cam
-            // resource, so those outbound clicks are tracked too, not just
-            // the public grid/feed pages.
-            $source = $request->query('src');
-            $source = in_array($source, ['grid', 'feed', 'admin'], strict: true) ? $source : 'grid';
-
             CamClickEvent::create([
                 'cam_id' => $cam->id,
                 'source_page' => $source,
             ]);
         }
 
-        return redirect()->away($cam->room_url);
+        return redirect()->away($this->trackedRoomUrl($cam->room_url, $source));
+    }
+
+    /**
+     * Chaturbate reports affiliate revenue/conversions broken out by the
+     * `track` query param on the outbound URL — it's a free-form sub-id,
+     * not something that has to be pre-registered on their side. We
+     * override whatever `track` value Chaturbate's API baked into
+     * `room_url` at sync time with our own `$source` label so grid vs.
+     * feed revenue is visible in Chaturbate's own affiliate dashboard,
+     * matching the `source_page` label used for our in-app click/view
+     * analytics.
+     */
+    private function trackedRoomUrl(string $roomUrl, string $source): string
+    {
+        $parts = parse_url($roomUrl);
+        if ($parts === false || empty($parts['host'])) {
+            return $roomUrl;
+        }
+
+        parse_str($parts['query'] ?? '', $query);
+        $query['track'] = $source;
+
+        $scheme = $parts['scheme'] ?? 'https';
+        $path = $parts['path'] ?? '/';
+
+        return "{$scheme}://{$parts['host']}{$path}?".http_build_query($query);
     }
 
     /**

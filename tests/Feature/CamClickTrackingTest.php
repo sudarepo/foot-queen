@@ -17,7 +17,7 @@ class CamClickTrackingTest extends TestCase
 
         $response = $this->get(route('cams.redirect', [$cam, 'src' => 'feed']));
 
-        $response->assertRedirect($cam->room_url);
+        $response->assertRedirect($cam->room_url.'?track=feed');
         $this->assertDatabaseHas('cam_click_events', [
             'cam_id' => $cam->id,
             'source_page' => 'feed',
@@ -54,11 +54,22 @@ class CamClickTrackingTest extends TestCase
 
         $response = $this->get(route('cams.redirect', [$cam, 'src' => 'admin']));
 
-        $response->assertRedirect($cam->room_url);
+        $response->assertRedirect($cam->room_url.'?track=admin');
         $this->assertDatabaseHas('cam_click_events', [
             'cam_id' => $cam->id,
             'source_page' => 'admin',
         ]);
+    }
+
+    public function test_redirect_overrides_the_existing_track_param_with_the_source_so_chaturbate_reports_it_separately(): void
+    {
+        $cam = Cam::factory()->create([
+            'room_url' => 'https://chaturbate.com/in/?tour=LQps&campaign=Vg4Qi&track=default&room=foxfilms',
+        ]);
+
+        $response = $this->get(route('cams.redirect', [$cam, 'src' => 'feed']));
+
+        $response->assertRedirect('https://chaturbate.com/in/?tour=LQps&campaign=Vg4Qi&track=feed&room=foxfilms');
     }
 
     public function test_click_event_belongs_to_its_cam(): void
@@ -82,7 +93,7 @@ class CamClickTrackingTest extends TestCase
         // crawler following /go/ links (robots.txt disallows it, but not
         // everything respects that) was logging a click with no matching
         // filtered view to divide it against.
-        $response->assertRedirect($cam->room_url);
+        $response->assertRedirect($cam->room_url.'?track=grid');
         $this->assertSame(0, CamClickEvent::count());
     }
 }
