@@ -810,8 +810,10 @@ body {
     transition: transform 0.3s;
 }
 
-.ig-post:hover .ig-post__media img {
-    transform: scale(1.02);
+@media (hover: hover) {
+    .ig-post:hover .ig-post__media img {
+        transform: scale(1.02);
+    }
 }
 
 .ig-post__media-placeholder {
@@ -976,10 +978,21 @@ body {
 
 @media (max-width: 640px) {
     .ig-feed { max-width: 100%; }
+}
 
-    /* Snap each post to the middle of the viewport as you scroll — the
-       TikTok/Reels "one at a time" feel — without hijacking scroll on the
-       rest of the page (proximity, not mandatory). */
+/* Tablet-ish widths (iPad Mini portrait, split view, small windows): the
+   default 470px column would sit stranded in the middle of the page. */
+@media (min-width: 641px) and (max-width: 779px) {
+    .ig-feed { max-width: 580px; }
+}
+
+/* Snap each post to the middle of the viewport as you scroll — the
+   TikTok/Reels "one at a time" feel — without hijacking scroll on the
+   rest of the page (proximity, not mandatory). Keyed to `hover: none`
+   rather than a width, so it matches the same test the script uses to
+   decide between scroll-autoplay and hover-to-preview: every device that
+   autoplays on scroll also snaps, tablets included. */
+@media (hover: none) {
     body.is-feed-page {
         scroll-snap-type: y proximity;
     }
@@ -990,13 +1003,18 @@ body {
     }
 }
 
-@media (min-width: 780px) {
+/* The "scroll for next" nudge belongs to the scroll-autoplay path only. */
+@media (hover: hover) {
     .ig-scroll-hint { display: none; }
 }
 
 /* Widen into a multi-column wall as viewport grows — a single 470px
-   column centered in a 1600px page reads as broken, not minimal. */
-@media (min-width: 780px) {
+   column centered in a 1600px page reads as broken, not minimal.
+   Pointer devices only: the multi-column grid needs hover to choose which
+   card previews. Without it, the scroll-autoplay path has to pick between
+   cards that are side by side and equally visible, and the choice jumps
+   around as you scroll. */
+@media (hover: hover) and (min-width: 780px) {
     .ig-feed { max-width: 1000px; }
 
     .ig-posts {
@@ -1007,12 +1025,21 @@ body {
     }
 }
 
-@media (min-width: 1240px) {
+@media (hover: hover) and (min-width: 1240px) {
     .ig-feed { max-width: 1520px; }
 
     .ig-posts {
         grid-template-columns: repeat(3, 1fr);
     }
+}
+
+/* Tablets: one column at a comfortable reading width, and a media box
+   capped so a whole card — preview, viewer count, CTA — fits on screen
+   at once instead of the CTA sitting below the fold on every post. */
+@media (hover: none) and (min-width: 780px) {
+    .ig-feed { max-width: 640px; }
+
+    .ig-post__media { max-height: 58vh; }
 }
 
 .ig-feed .page-heading__sub {
