@@ -7,8 +7,11 @@ use App\Models\CamClickEvent;
 use App\Models\PageViewEvent;
 use App\Services\HomepageAbTest;
 use App\Services\SeoPageResolver;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cookie;
 use Illuminate\View\View;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -95,9 +98,22 @@ class CamController extends Controller
      * index() — either way, a page view is logged exactly once here, at the
      * point content actually renders.
      */
-    public function feed(Request $request): View
+    public function feed(Request $request): View|JsonResponse
     {
         $filters = $this->parseFilters($request);
+
+        // Infinite scroll: pages after the first are fetched by the client and
+        // appended, so only the post markup goes back — not a whole document,
+        // and not another page view (the one logged on the initial render
+        // already covers this visit, however far the user keeps scrolling).
+        if ($request->boolean('partial')) {
+            $cams = $this->onlineCams($filters);
+
+            return response()->json([
+                'html' => view('cams._feed-posts', ['cams' => $cams])->render(),
+                'next_page_url' => $cams->nextPageUrl(),
+            ]);
+        }
 
         if (! $this->abTest->isBot($request)) {
             PageViewEvent::create(['page' => HomepageAbTest::VARIANT_FEED]);
@@ -178,11 +194,7 @@ class CamController extends Controller
         string $canonicalUrl,
         string $view = 'cams.index',
     ): View {
-        $cams = Cam::online()
-            ->filter($filters)
-            ->orderByDesc('viewers')
-            ->paginate(48)
-            ->withQueryString();
+        $cams = $this->onlineCams($filters);
 
         return view($view, [
             'cams' => $cams,
@@ -194,6 +206,25 @@ class CamController extends Controller
             'metaDesc' => $meta,
             'canonicalUrl' => $canonicalUrl,
         ]);
+    }
+
+    /**
+     * The one query behind every listing — grid, landing pages, and both the
+     * initial render and the infinite-scroll batches of the feed.
+     *
+     * Filters are carried into the pagination links, but `partial` is not:
+     * it's a transport detail of the scroll fetch, not part of the page's
+     * identity, and keeping it would bake it into every "next page" URL.
+     *
+     * @return LengthAwarePaginator<int, Cam>
+     */
+    private function onlineCams(array $filters): LengthAwarePaginator
+    {
+        return Cam::online()
+            ->filter($filters)
+            ->orderByDesc('viewers')
+            ->paginate(48)
+            ->appends(Arr::except(request()->query(), ['page', 'partial']));
     }
 
     private function parseFilters(Request $request): array

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Cam;
+use App\Models\PageViewEvent;
 use App\Services\HomepageAbTest;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -42,6 +43,61 @@ class CamFeedTest extends TestCase
             ->assertSee('index,follow', false);
 
         $this->get('/sitemap.xml')->assertSee(url('/feed'), false);
+    }
+
+    public function test_feed_exposes_an_infinite_scroll_anchor_pointing_at_the_next_page(): void
+    {
+        Cam::factory()->count(50)->create(['is_online' => true]);
+
+        $response = $this->get('/feed');
+
+        $response->assertSee('id="igFeedMore"', false);
+        $response->assertSee('data-next-url="'.e(url('/feed?page=2')).'"', false);
+    }
+
+    public function test_feed_hides_the_infinite_scroll_anchor_on_the_last_page(): void
+    {
+        Cam::factory()->count(3)->create(['is_online' => true]);
+
+        $this->get('/feed')->assertDontSee('id="igFeedMore"', false);
+    }
+
+    public function test_partial_feed_request_returns_only_post_markup_and_the_next_page_url(): void
+    {
+        Cam::factory()->count(50)->create(['is_online' => true]);
+
+        $response = $this->getJson('/feed?partial=1&page=2');
+
+        $response->assertStatus(200);
+        $response->assertJsonStructure(['html', 'next_page_url']);
+
+        // Two full pages exactly: page 2 holds the remaining 2 cams and ends the feed.
+        $this->assertNull($response->json('next_page_url'));
+        $this->assertSame(2, substr_count($response->json('html'), '<article class="ig-post">'));
+
+        // Post markup only — no layout chrome, since it's appended into an existing page.
+        $this->assertStringNotContainsString('<html', $response->json('html'));
+    }
+
+    public function test_partial_feed_pages_carry_active_filters_but_not_the_partial_flag(): void
+    {
+        Cam::factory()->count(50)->create(['is_online' => true, 'gender' => 'female']);
+        Cam::factory()->count(5)->create(['is_online' => true, 'gender' => 'male']);
+
+        $nextPageUrl = $this->getJson('/feed?partial=1&gender=female')->json('next_page_url');
+
+        $this->assertStringContainsString('gender=female', $nextPageUrl);
+        $this->assertStringNotContainsString('partial', $nextPageUrl);
+    }
+
+    public function test_partial_feed_requests_do_not_log_extra_page_views(): void
+    {
+        Cam::factory()->count(50)->create(['is_online' => true]);
+
+        $this->get('/feed');
+        $this->getJson('/feed?partial=1&page=2');
+
+        $this->assertSame(1, PageViewEvent::where('page', HomepageAbTest::VARIANT_FEED)->count());
     }
 
     public function test_feed_cards_expose_a_hover_preview_hook_only_when_an_embed_url_exists(): void

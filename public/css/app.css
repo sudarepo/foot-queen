@@ -1046,3 +1046,71 @@ body {
     margin-left: auto;
     margin-right: auto;
 }
+
+/* Infinite-scroll anchor. Without JS (or after a failed batch) it's a plain
+   "load more" link to the next page; with JS it's a spinner that appears
+   while the next batch is in flight. */
+.ig-feed__more {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 72px;
+    padding: 24px 0 40px;
+}
+
+.ig-feed__more-link {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 10px 22px;
+    transition: border-color 0.2s ease, color 0.2s ease;
+}
+
+.ig-feed__more-link:hover {
+    border-color: var(--accent);
+    color: var(--accent-hot);
+}
+
+.ig-feed__more.is-auto .ig-feed__more-link {
+    display: none;
+}
+
+.ig-feed__more.is-auto.has-error .ig-feed__more-link {
+    display: inline-block;
+}
+
+.ig-feed__more-spinner {
+    display: none;
+    width: 22px;
+    height: 22px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent-hot);
+    border-radius: 50%;
+    animation: ig-feed-spin 0.7s linear infinite;
+}
+
+.ig-feed__more.is-loading .ig-feed__more-spinner {
+    display: block;
+}
+
+@keyframes ig-feed-spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ig-feed__more-spinner { animation-duration: 2s; }
+}
+
+.ig-feed__end {
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    padding: 24px 0 48px;
+}
