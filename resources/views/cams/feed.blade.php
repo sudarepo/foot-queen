@@ -6,6 +6,8 @@
     {{-- Warm the connection ahead of the first preview — skips DNS/TCP/TLS
          setup (can be several hundred ms) on the request that actually
          matters instead of paying it cold on first hover/scroll-into-view. --}}
+    <link rel="preconnect" href="https://cbxyz.com">
+    <link rel="dns-prefetch" href="https://cbxyz.com">
     <link rel="preconnect" href="https://chaturbate.com">
     <link rel="dns-prefetch" href="https://chaturbate.com">
 @endpush
@@ -36,70 +38,23 @@
                 <a href="{{ route('cams.index') }}">Show all</a>
             </div>
         @else
-            <div class="ig-posts">
-                @foreach ($cams as $cam)
-                    <article class="ig-post">
-                        <header class="ig-post__header">
-                            <span class="ig-post__avatar">
-                                @if ($cam->thumbnail_url)
-                                    <img src="{{ $cam->thumbnail_url }}" alt="{{ $cam->username }}" loading="lazy">
-                                @endif
-                            </span>
-                            <div class="ig-post__headmeta">
-                                <span class="ig-post__user">{{ $cam->username }}</span>
-                                <span class="ig-post__sub">
-                                    @if ($cam->hair_color){{ ucfirst($cam->hair_color) }}@endif
-                                    @if ($cam->body_type) &middot; {{ ucfirst($cam->body_type) }}@endif
-                                    @if ($cam->age) &middot; {{ $cam->age }}@endif
-                                </span>
-                            </div>
-                            <span class="ig-post__live"><span class="live-dot"></span> LIVE</span>
-                        </header>
-
-                        <a href="{{ route('cams.redirect', [$cam, 'src' => 'feed']) }}"
-                           class="ig-post__media"
-                           target="_blank"
-                           rel="noopener nofollow"
-                           @if ($cam->embed_url) data-embed-url="{{ $cam->embed_url }}" @endif>
-                            @if ($cam->thumbnail_url)
-                                <img src="{{ $cam->thumbnail_url }}" alt="{{ $cam->username }}" loading="lazy">
-                            @else
-                                <div class="ig-post__media-placeholder"></div>
-                            @endif
-                            <div class="ig-post__badges">
-                                @if ($cam->is_new)<span class="badge badge--new">NEW</span>@endif
-                                @if ($cam->is_hd)<span class="badge badge--hd">HD</span>@endif
-                            </div>
-                            @if ($cam->embed_url)
-                                <span class="ig-post__preview-hint">&#9654; Live preview</span>
-                            @endif
-                        </a>
-
-                        <div class="ig-post__actions">
-                            <span class="ig-post__heart" aria-hidden="true">&#9825;</span>
-                            <span class="ig-post__count">{{ number_format($cam->viewers) }} watching now</span>
-                        </div>
-
-                        <p class="ig-post__caption">
-                            <strong>{{ $cam->username }}</strong>
-                            @foreach (array_slice($cam->categories ?? [], 0, 4) as $cat)
-                                <span class="ig-post__tag">#{{ $cat }}</span>
-                            @endforeach
-                        </p>
-
-                        <a href="{{ route('cams.redirect', [$cam, 'src' => 'feed']) }}"
-                           class="ig-post__cta"
-                           target="_blank"
-                           rel="noopener nofollow">
-                            Join the room &rarr;
-                        </a>
-                    </article>
-                @endforeach
+            <div class="ig-posts" id="igPosts">
+                @include('cams._feed-posts')
             </div>
 
-            <div class="pagination">
-                {{ $cams->links() }}
-            </div>
+            {{-- Infinite scroll anchor. The href is a real link to the next
+                 page, so this works as plain "load more" pagination without
+                 JS (and stays crawlable); the script below hides it and
+                 fetches batches automatically as the anchor scrolls into
+                 view, restoring it if a fetch fails. --}}
+            @if ($cams->hasMorePages())
+                <div class="ig-feed__more" id="igFeedMore" data-next-url="{{ $cams->nextPageUrl() }}">
+                    <span class="ig-feed__more-spinner" aria-hidden="true"></span>
+                    <a class="ig-feed__more-link" href="{{ $cams->nextPageUrl() }}" rel="next">Load more cams</a>
+                </div>
+            @endif
+
+            <p class="ig-feed__end" id="igFeedEnd" hidden>You&rsquo;ve reached the end of the feed.</p>
         @endif
     </div>
 @endsection
@@ -111,8 +66,9 @@
             var SETTLE_DELAY = 200;  // ms of stable scroll position before mounting on mobile
             var isTouch = window.matchMedia('(hover: none)').matches;
 
-            var cards = Array.prototype.slice.call(document.querySelectorAll('.ig-post__media[data-embed-url]'));
-            if (!cards.length) return;
+            // Grows as infinite scroll appends batches; always in feed order,
+            // which the "pre-buffer the next card" logic below relies on.
+            var cards = [];
 
             var active = null;     // { el, iframe, overlay } — visible & playing, at most one
             var preloading = null; // { el, iframe } — hidden, warming up in the background, at most one
@@ -191,12 +147,13 @@
                 active = null;
             }
 
+            var previewObserver = null;
+            var settleTimer = null;
+
             if (isTouch) {
                 // Touch/mobile: autoplay whichever card is most visible as the user
                 // scrolls, one at a time — like a TikTok/Reels feed.
-                var settleTimer = null;
-
-                var observer = new IntersectionObserver(function (entries) {
+                previewObserver = new IntersectionObserver(function (entries) {
                     var best = null;
 
                     entries.forEach(function (entry) {
@@ -221,9 +178,53 @@
                         }, SETTLE_DELAY);
                     }
                 }, { threshold: [0, 0.2, 0.4, 0.6, 0.8, 1] });
+            }
 
-                cards.forEach(function (el) { observer.observe(el); });
+            // Desktop: preview on hover / keyboard focus.
+            function bindHoverPreview(el) {
+                var hoverTimer = null;
 
+                el.addEventListener('mouseenter', function () {
+                    // Start loading immediately so the fetch runs *during* the
+                    // dwell window instead of after it — by the time the dwell
+                    // elapses (if the user is still hovering), it's often
+                    // already loaded and just needs revealing.
+                    startPreload(el);
+                    hoverTimer = setTimeout(function () { activate(el); }, HOVER_DELAY);
+                });
+                el.addEventListener('mouseleave', function () {
+                    clearTimeout(hoverTimer);
+                    if (preloading && preloading.el === el) cancelPreload();
+                    if (active && active.el === el) unmountActive();
+                });
+                el.addEventListener('focus', function () { activate(el); });
+                el.addEventListener('blur', function () {
+                    if (active && active.el === el) unmountActive();
+                });
+            }
+
+            // Cards arrive in two waves: the server-rendered first page, then
+            // every batch the infinite scroll appends. Both go through here so
+            // a card behaves identically whenever it entered the DOM. Already
+            // known cards are skipped, so re-scanning the container is cheap.
+            function registerCards(root) {
+                var found = root.querySelectorAll('.ig-post__media[data-embed-url]');
+
+                Array.prototype.forEach.call(found, function (el) {
+                    if (cards.indexOf(el) !== -1) return;
+                    cards.push(el);
+
+                    if (isTouch) {
+                        previewObserver.observe(el);
+                    } else {
+                        bindHoverPreview(el);
+                    }
+                });
+            }
+
+            registerCards(document);
+
+            if (isTouch) {
                 // One-time "keep scrolling" nudge, shown as soon as the first
                 // card auto-activates and dismissed on the user's first scroll.
                 var hint = document.getElementById('igScrollHint');
@@ -237,30 +238,100 @@
                         hint.classList.remove('is-visible');
                     }, { once: true, passive: true });
                 }
-            } else {
-                // Desktop: preview on hover / keyboard focus.
-                cards.forEach(function (el) {
-                    var hoverTimer = null;
-
-                    el.addEventListener('mouseenter', function () {
-                        // Start loading immediately so the fetch runs *during* the
-                        // dwell window instead of after it — by the time the dwell
-                        // elapses (if the user is still hovering), it's often
-                        // already loaded and just needs revealing.
-                        startPreload(el);
-                        hoverTimer = setTimeout(function () { activate(el); }, HOVER_DELAY);
-                    });
-                    el.addEventListener('mouseleave', function () {
-                        clearTimeout(hoverTimer);
-                        if (preloading && preloading.el === el) cancelPreload();
-                        if (active && active.el === el) unmountActive();
-                    });
-                    el.addEventListener('focus', function () { activate(el); });
-                    el.addEventListener('blur', function () {
-                        if (active && active.el === el) unmountActive();
-                    });
-                });
             }
+
+            /* ----------  Infinite scroll  ---------- */
+
+            var posts = document.getElementById('igPosts');
+            var more = document.getElementById('igFeedMore');
+            var end = document.getElementById('igFeedEnd');
+
+            if (!posts || !more || !window.fetch || !window.IntersectionObserver) return;
+
+            var nextUrl = more.dataset.nextUrl || '';
+            var loading = false;
+
+            // Marks the "load more" link as script-driven, which hides it —
+            // it comes back if a batch fails so the user still has a way on.
+            more.classList.add('is-auto');
+
+            function finish() {
+                scrollObserver.disconnect();
+                more.remove();
+                if (end) end.hidden = false;
+            }
+
+            function loadNextBatch() {
+                if (loading || !nextUrl) return;
+                loading = true;
+                more.classList.remove('has-error');
+                more.classList.add('is-loading');
+
+                var url = nextUrl + (nextUrl.indexOf('?') === -1 ? '?' : '&') + 'partial=1';
+
+                fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' }, credentials: 'same-origin' })
+                    .then(function (response) {
+                        if (!response.ok) throw new Error('HTTP ' + response.status);
+                        return response.json();
+                    })
+                    .then(function (data) {
+                        var buffer = document.createElement('div');
+                        buffer.innerHTML = data.html;
+
+                        while (buffer.firstElementChild) {
+                            posts.appendChild(buffer.firstElementChild);
+                        }
+
+                        registerCards(posts);
+
+                        nextUrl = data.next_page_url || '';
+                        loading = false;
+                        more.classList.remove('is-loading');
+
+                        if (!nextUrl) {
+                            finish();
+                            return;
+                        }
+
+                        more.dataset.nextUrl = nextUrl;
+                        var link = more.querySelector('.ig-feed__more-link');
+                        if (link) link.href = nextUrl;
+
+                        // The anchor may still be on screen after a short
+                        // batch — observing it again re-fires only if it is.
+                        scrollObserver.unobserve(more);
+                        scrollObserver.observe(more);
+                    })
+                    .catch(function () {
+                        // Fall back to the plain link rather than retrying in a
+                        // loop against whatever is failing.
+                        loading = false;
+                        more.classList.remove('is-loading');
+                        more.classList.add('has-error');
+                        scrollObserver.unobserve(more);
+                    });
+            }
+
+            // rootMargin starts the next batch while the anchor is still a
+            // screenful below the fold, so posts are usually in place before
+            // the user scrolls that far.
+            var scrollObserver = new IntersectionObserver(function (entries) {
+                entries.forEach(function (entry) {
+                    if (entry.isIntersecting) loadNextBatch();
+                });
+            }, { rootMargin: '800px 0px' });
+
+            scrollObserver.observe(more);
+
+            // After an error the link is visible again; clicking it retries in
+            // place instead of navigating away and losing the user's position.
+            more.addEventListener('click', function (event) {
+                var link = event.target.closest('.ig-feed__more-link');
+                if (!link) return;
+                event.preventDefault();
+                scrollObserver.observe(more);
+                loadNextBatch();
+            });
         })();
     </script>
 @endpush

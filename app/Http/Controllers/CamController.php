@@ -7,8 +7,11 @@ use App\Models\CamClickEvent;
 use App\Models\PageViewEvent;
 use App\Services\HomepageAbTest;
 use App\Services\SeoPageResolver;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cookie;
 use Illuminate\View\View;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -95,9 +98,22 @@ class CamController extends Controller
      * index() — either way, a page view is logged exactly once here, at the
      * point content actually renders.
      */
-    public function feed(Request $request): View
+    public function feed(Request $request): View|JsonResponse
     {
         $filters = $this->parseFilters($request);
+
+        // Infinite scroll: pages after the first are fetched by the client and
+        // appended, so only the post markup goes back — not a whole document,
+        // and not another page view (the one logged on the initial render
+        // already covers this visit, however far the user keeps scrolling).
+        if ($request->boolean('partial')) {
+            $cams = $this->onlineCams($filters);
+
+            return response()->json([
+                'html' => view('cams._feed-posts', ['cams' => $cams])->render(),
+                'next_page_url' => $cams->nextPageUrl(),
+            ]);
+        }
 
         if (! $this->abTest->isBot($request)) {
             PageViewEvent::create(['page' => HomepageAbTest::VARIANT_FEED]);
@@ -117,17 +133,53 @@ class CamController extends Controller
     public function redirectToRoom(Request $request, Cam $cam): RedirectResponse
     {
         // 'admin' covers the "Visit Room" action in the Filament cam
-        // resource, so those outbound clicks are tracked too, not just the
-        // public grid/feed pages.
+        // resource, so those outbound clicks are tracked too, not just
+        // the public grid/feed pages.
         $source = $request->query('src');
         $source = in_array($source, ['grid', 'feed', 'admin'], strict: true) ? $source : 'grid';
 
-        CamClickEvent::create([
-            'cam_id' => $cam->id,
-            'source_page' => $source,
-        ]);
+        // The redirect itself always happens, bot or not — no reason to block
+        // it. Only the click *log* is bot-gated, to match how page views are
+        // filtered (index()/feed() above). Without this, a crawler that
+        // follows /go/ links (robots.txt disallows it, but not everything
+        // respects that) inflates click counts with no matching filtered
+        // view, which is exactly what produced a 1200%+ CTR on grid in
+        // practice — clicks with no bot filter at all, divided by views that
+        // were already filtered.
+        if (! $this->abTest->isBot($request)) {
+            CamClickEvent::create([
+                'cam_id' => $cam->id,
+                'source_page' => $source,
+            ]);
+        }
 
-        return redirect()->away($cam->room_url);
+        return redirect()->away($this->trackedRoomUrl($cam->room_url, $source));
+    }
+
+    /**
+     * Chaturbate reports affiliate revenue/conversions broken out by the
+     * `track` query param on the outbound URL — it's a free-form sub-id,
+     * not something that has to be pre-registered on their side. We
+     * override whatever `track` value Chaturbate's API baked into
+     * `room_url` at sync time with our own `$source` label so grid vs.
+     * feed revenue is visible in Chaturbate's own affiliate dashboard,
+     * matching the `source_page` label used for our in-app click/view
+     * analytics.
+     */
+    private function trackedRoomUrl(string $roomUrl, string $source): string
+    {
+        $parts = parse_url($roomUrl);
+        if ($parts === false || empty($parts['host'])) {
+            return $roomUrl;
+        }
+
+        parse_str($parts['query'] ?? '', $query);
+        $query['track'] = $source;
+
+        $scheme = $parts['scheme'] ?? 'https';
+        $path = $parts['path'] ?? '/';
+
+        return "{$scheme}://{$parts['host']}{$path}?".http_build_query($query);
     }
 
     /**
@@ -142,11 +194,7 @@ class CamController extends Controller
         string $canonicalUrl,
         string $view = 'cams.index',
     ): View {
-        $cams = Cam::online()
-            ->filter($filters)
-            ->orderByDesc('viewers')
-            ->paginate(48)
-            ->withQueryString();
+        $cams = $this->onlineCams($filters);
 
         return view($view, [
             'cams' => $cams,
@@ -158,6 +206,25 @@ class CamController extends Controller
             'metaDesc' => $meta,
             'canonicalUrl' => $canonicalUrl,
         ]);
+    }
+
+    /**
+     * The one query behind every listing — grid, landing pages, and both the
+     * initial render and the infinite-scroll batches of the feed.
+     *
+     * Filters are carried into the pagination links, but `partial` is not:
+     * it's a transport detail of the scroll fetch, not part of the page's
+     * identity, and keeping it would bake it into every "next page" URL.
+     *
+     * @return LengthAwarePaginator<int, Cam>
+     */
+    private function onlineCams(array $filters): LengthAwarePaginator
+    {
+        return Cam::online()
+            ->filter($filters)
+            ->orderByDesc('viewers')
+            ->paginate(48)
+            ->appends(Arr::except(request()->query(), ['page', 'partial']));
     }
 
     private function parseFilters(Request $request): array

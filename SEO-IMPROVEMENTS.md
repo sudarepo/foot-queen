@@ -447,6 +447,44 @@ after.
 - `tests/Feature/CamClickTrackingTest.php` — clicking through with `src=admin`
   logs `source_page = 'admin'`.
 
+### 8. Fixed: bot-inflated click counts (CTR was reading over 1000%)
+
+Real production numbers reported: **Grid — 1,107 clicks / 92 views (1203%
+CTR)**, Feed — 47 clicks / 84 views (56% CTR). Grid's number is impossible
+for organic traffic at that scale, so this was a real bug, not just "people
+click a lot" — clicking from a card opens Chaturbate in a new tab (the grid
+page itself stays open), so more clicks than views *can* happen legitimately
+if someone browses several cams from one visit, but not 12 clicks per view.
+
+Root cause: `CamController::redirectToRoom()` (`/go/{cam}`) logged **every**
+click with no bot filtering at all, while `index()`/`feed()` only log page
+views for real (non-bot) visitors via `HomepageAbTest::isBot()`. That
+asymmetry means any crawler/scraper that follows `/go/` links — `robots.txt`
+disallows that path, but plenty of bots don't respect it — added to the click
+count with zero matching filtered view to divide it against. Grid's cards are
+plain server-rendered `<a href="/go/...">` links from page one, easy for any
+naive HTML-parsing bot to follow at volume; that fits the scale of the
+inflation seen.
+
+**One thing this incident did confirm working correctly: the 50/50 split
+itself.** Views were 92 grid / 84 feed — a 52%/48% split, well within normal
+variance for that sample size. The split math was never broken; only the
+click side of the measurement was.
+
+Fix: `redirectToRoom()` now gates the click *log* behind the same
+`isBot()` check as page views — mirroring `index()`/`feed()` exactly. The
+redirect itself is never blocked for bots (no reason to; a bot following the
+link through to Chaturbate is harmless), only whether the click gets counted.
+
+Verified directly against a running server, not just in tests: curled
+`/go/{cam}` with an `AhrefsBot` user-agent — got a real `302` redirect, but
+`cam_click_events` row count didn't move. Curled the same URL with a normal
+browser user-agent immediately after — redirected the same way, and the row
+count went up by one.
+
+- `tests/Feature/CamClickTrackingTest.php` — a bot user-agent still gets
+  redirected (`assertRedirect`) but logs zero click events.
+
 ## Not done — still worth a decision
 
 `/guys`, `/trans`, `/couples` and their sub-pages (`config/seo-pages.php`) are

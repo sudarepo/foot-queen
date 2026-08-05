@@ -810,8 +810,10 @@ body {
     transition: transform 0.3s;
 }
 
-.ig-post:hover .ig-post__media img {
-    transform: scale(1.02);
+@media (hover: hover) {
+    .ig-post:hover .ig-post__media img {
+        transform: scale(1.02);
+    }
 }
 
 .ig-post__media-placeholder {
@@ -976,10 +978,21 @@ body {
 
 @media (max-width: 640px) {
     .ig-feed { max-width: 100%; }
+}
 
-    /* Snap each post to the middle of the viewport as you scroll — the
-       TikTok/Reels "one at a time" feel — without hijacking scroll on the
-       rest of the page (proximity, not mandatory). */
+/* Tablet-ish widths (iPad Mini portrait, split view, small windows): the
+   default 470px column would sit stranded in the middle of the page. */
+@media (min-width: 641px) and (max-width: 779px) {
+    .ig-feed { max-width: 580px; }
+}
+
+/* Snap each post to the middle of the viewport as you scroll — the
+   TikTok/Reels "one at a time" feel — without hijacking scroll on the
+   rest of the page (proximity, not mandatory). Keyed to `hover: none`
+   rather than a width, so it matches the same test the script uses to
+   decide between scroll-autoplay and hover-to-preview: every device that
+   autoplays on scroll also snaps, tablets included. */
+@media (hover: none) {
     body.is-feed-page {
         scroll-snap-type: y proximity;
     }
@@ -990,13 +1003,18 @@ body {
     }
 }
 
-@media (min-width: 780px) {
+/* The "scroll for next" nudge belongs to the scroll-autoplay path only. */
+@media (hover: hover) {
     .ig-scroll-hint { display: none; }
 }
 
 /* Widen into a multi-column wall as viewport grows — a single 470px
-   column centered in a 1600px page reads as broken, not minimal. */
-@media (min-width: 780px) {
+   column centered in a 1600px page reads as broken, not minimal.
+   Pointer devices only: the multi-column grid needs hover to choose which
+   card previews. Without it, the scroll-autoplay path has to pick between
+   cards that are side by side and equally visible, and the choice jumps
+   around as you scroll. */
+@media (hover: hover) and (min-width: 780px) {
     .ig-feed { max-width: 1000px; }
 
     .ig-posts {
@@ -1007,7 +1025,7 @@ body {
     }
 }
 
-@media (min-width: 1240px) {
+@media (hover: hover) and (min-width: 1240px) {
     .ig-feed { max-width: 1520px; }
 
     .ig-posts {
@@ -1015,7 +1033,84 @@ body {
     }
 }
 
+/* Tablets: one column at a comfortable reading width, and a media box
+   capped so a whole card — preview, viewer count, CTA — fits on screen
+   at once instead of the CTA sitting below the fold on every post. */
+@media (hover: none) and (min-width: 780px) {
+    .ig-feed { max-width: 640px; }
+
+    .ig-post__media { max-height: 58vh; }
+}
+
 .ig-feed .page-heading__sub {
     margin-left: auto;
     margin-right: auto;
+}
+
+/* Infinite-scroll anchor. Without JS (or after a failed batch) it's a plain
+   "load more" link to the next page; with JS it's a spinner that appears
+   while the next batch is in flight. */
+.ig-feed__more {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 72px;
+    padding: 24px 0 40px;
+}
+
+.ig-feed__more-link {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 10px 22px;
+    transition: border-color 0.2s ease, color 0.2s ease;
+}
+
+.ig-feed__more-link:hover {
+    border-color: var(--accent);
+    color: var(--accent-hot);
+}
+
+.ig-feed__more.is-auto .ig-feed__more-link {
+    display: none;
+}
+
+.ig-feed__more.is-auto.has-error .ig-feed__more-link {
+    display: inline-block;
+}
+
+.ig-feed__more-spinner {
+    display: none;
+    width: 22px;
+    height: 22px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent-hot);
+    border-radius: 50%;
+    animation: ig-feed-spin 0.7s linear infinite;
+}
+
+.ig-feed__more.is-loading .ig-feed__more-spinner {
+    display: block;
+}
+
+@keyframes ig-feed-spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ig-feed__more-spinner { animation-duration: 2s; }
+}
+
+.ig-feed__end {
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    padding: 24px 0 48px;
 }
