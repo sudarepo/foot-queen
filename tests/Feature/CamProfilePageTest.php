@@ -69,7 +69,73 @@ class CamProfilePageTest extends TestCase
         $response->assertSee('First paragraph.');
         $response->assertSee('Second paragraph.');
         $response->assertSee('Ukraine');
+        // Counts read like a creator page — abbreviated on the tile, exact in
+        // the tooltip, so a six-figure follower count doesn't wreck the row.
+        $response->assertSee('12.3K');
         $response->assertSee('12,345 followers');
+    }
+
+    public function test_the_stats_row_counts_videos_and_photo_sets_separately(): void
+    {
+        $cam = $this->camWithProfile();
+
+        $response = $this->get(route('cams.show', $cam->username));
+
+        $response->assertSee('Video</span>', false);
+        $response->assertSee('Photo set</span>', false);
+    }
+
+    /**
+     * Filtering only earns its place when there is something to filter.
+     */
+    public function test_media_tabs_appear_only_when_there_are_both_videos_and_photos(): void
+    {
+        $mixed = $this->camWithProfile();
+
+        $this->get(route('cams.show', $mixed->username))
+            ->assertSee('data-filter="video"', false)
+            ->assertSee('data-filter="photo"', false);
+
+        $videosOnly = $this->camWithProfile([
+            'username' => 'bea',
+            'photo_sets' => [[
+                'id' => 9,
+                'name' => 'Only video',
+                'cover_url' => 'https://static-pub.example.com/c.jpg',
+                'tokens' => 50,
+                'is_video' => true,
+                'fan_club_only' => false,
+                'photo_count' => 0,
+                'num_videos' => 1,
+                'duration_seconds' => 60,
+            ]],
+        ]);
+
+        $this->get(route('cams.show', $videosOnly->username))
+            ->assertSee('Only video')
+            ->assertDontSee('data-filter="photo"', false);
+    }
+
+    public function test_fan_club_sets_are_labelled_instead_of_priced(): void
+    {
+        $cam = $this->camWithProfile([
+            'photo_sets' => [[
+                'id' => 3,
+                'name' => 'Members only',
+                'cover_url' => 'https://static-pub.example.com/c.jpg',
+                'tokens' => 400,
+                'is_video' => false,
+                'fan_club_only' => true,
+                'photo_count' => 8,
+                'num_videos' => 0,
+                'duration_seconds' => 0,
+            ]],
+        ]);
+
+        $response = $this->get(route('cams.show', $cam->username));
+
+        $response->assertSee('Fan club');
+        $response->assertDontSee('400 tk');
     }
 
     public function test_it_renders_the_pics_and_vids_tab(): void
