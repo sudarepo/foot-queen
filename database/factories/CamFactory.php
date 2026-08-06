@@ -25,7 +25,9 @@ class CamFactory extends Factory
             'age' => $this->faker->numberBetween(18, 45),
             'hair_color' => $this->faker->randomElement(['blonde', 'brunette', 'black', 'red']),
             'body_type' => $this->faker->randomElement(['slim', 'athletic', 'average', 'curvy']),
-            'categories' => $this->faker->randomElements(['feet', 'lovense', 'latina'], 2),
+            // 'feet' is always present: the sync is tag-scoped to foot cams, so
+            // that's what the table actually holds.
+            'categories' => ['feet', $this->faker->randomElement(['lovense', 'latina'])],
             'viewers' => $this->faker->numberBetween(1, 5000),
             'thumbnail_url' => $this->faker->imageUrl(),
             'room_url' => 'https://chaturbate.com/'.$this->faker->userName().'/',

@@ -18,6 +18,19 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class CamController extends Controller
 {
+    /**
+     * This is a foot-cam site, so both listings start on the foot category
+     * instead of everything the sync happens to have pulled in. The Chaturbate
+     * sync is already tag-scoped ('feet', 'footfetish', 'toes' — see
+     * ChaturbateProvider), but a performer pulled in under one of the narrower
+     * tags doesn't necessarily carry 'feet' in `categories`, so the listing
+     * applies the category itself rather than trusting the table.
+     *
+     * It's a default, not a lock: the category dropdown still switches away
+     * from it. See withDefaultCategory().
+     */
+    private const DEFAULT_CATEGORY = 'feet';
+
     public function __construct(
         private SeoPageResolver $seo,
         private HomepageAbTest $abTest,
@@ -31,7 +44,7 @@ class CamController extends Controller
      */
     public function index(Request $request): View|RedirectResponse
     {
-        $filters = $this->parseFilters($request);
+        $userFilters = $this->parseFilters($request);
 
         if (! $this->abTest->isBot($request)) {
             [$variant, $isNewAssignment] = $this->abTest->resolve($request);
@@ -50,11 +63,11 @@ class CamController extends Controller
         }
 
         return $this->renderGrid(
-            filters: $filters,
-            userFilters: $filters,
-            h1: 'Live Cams',
-            title: 'Live Cams — Watch Free Webcams Now',
-            meta: 'Thousands of performers broadcasting live. Filter by gender, age, hair color, body type, and more.',
+            filters: $this->withDefaultCategory($request, $userFilters),
+            userFilters: $userFilters,
+            h1: 'Live Feet Cams',
+            title: 'Live Feet Cams — Watch Free Foot Fetish Webcams Now',
+            meta: 'Feet, soles, and toes live on cam right now. Filter by age, hair color, body type, and more.',
             canonicalUrl: url('/'),
         );
     }
@@ -100,7 +113,8 @@ class CamController extends Controller
      */
     public function feed(Request $request): View|JsonResponse
     {
-        $filters = $this->parseFilters($request);
+        $userFilters = $this->parseFilters($request);
+        $filters = $this->withDefaultCategory($request, $userFilters);
 
         // Infinite scroll: pages after the first are fetched by the client and
         // appended, so only the post markup goes back — not a whole document,
@@ -121,10 +135,10 @@ class CamController extends Controller
 
         return $this->renderGrid(
             filters: $filters,
-            userFilters: $filters,
-            h1: 'Live Cams',
-            title: 'Live Cams — Watch Free Webcams Now',
-            meta: 'Thousands of performers broadcasting live. Scroll the feed and tap in.',
+            userFilters: $userFilters,
+            h1: 'Live Feet Cams',
+            title: 'Live Feet Cams — Watch Free Foot Fetish Webcams Now',
+            meta: 'Feet, soles, and toes live on cam right now. Scroll the feed and tap in.',
             canonicalUrl: url('/feed'),
             view: 'cams.feed',
         );
@@ -198,7 +212,13 @@ class CamController extends Controller
 
         return view($view, [
             'cams' => $cams,
-            'filters' => $userFilters,  // view only shows user-chosen filters in dropdowns
+            // Dropdowns show what the listing is *actually* filtered by —
+            // including the default category and any landing-page preset — so
+            // the bar never claims "All categories" over a narrowed listing.
+            // `userFilters` is only what the visitor picked, which is what the
+            // "Clear" link needs to know about.
+            'filters' => $filters,
+            'userFilters' => $userFilters,
             'filterMeta' => $this->filterMeta(),
             'totalOnline' => Cam::online()->count(),
             'h1' => $h1,
@@ -225,6 +245,23 @@ class CamController extends Controller
             ->orderByDesc('viewers')
             ->paginate(48)
             ->appends(Arr::except(request()->query(), ['page', 'partial']));
+    }
+
+    /**
+     * Applies the site's default category to a filter set.
+     *
+     * Only fills in a category the visitor never expressed an opinion about.
+     * Picking "All categories" in the filter bar submits an empty `category=`,
+     * which is a deliberate choice — it clears the default rather than falling
+     * back to it, so the dropdown can actually leave the foot category.
+     */
+    private function withDefaultCategory(Request $request, array $filters): array
+    {
+        if (! $request->has('category')) {
+            $filters['category'] = self::DEFAULT_CATEGORY;
+        }
+
+        return $filters;
     }
 
     private function parseFilters(Request $request): array

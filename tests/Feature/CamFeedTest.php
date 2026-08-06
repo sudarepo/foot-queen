@@ -36,6 +36,79 @@ class CamFeedTest extends TestCase
         $response->assertViewHas('cams', fn ($cams) => $cams->total() === 3);
     }
 
+    public function test_feed_only_shows_cams_in_the_feet_category(): void
+    {
+        Cam::factory()->count(2)->create(['is_online' => true, 'categories' => ['feet', 'lovense']]);
+        Cam::factory()->create(['is_online' => true, 'categories' => ['lovense']]);
+
+        $this->get('/feed')->assertViewHas('cams', fn ($cams) => $cams->total() === 2);
+    }
+
+    public function test_grid_only_shows_cams_in_the_feet_category(): void
+    {
+        Cam::factory()->count(2)->create(['is_online' => true, 'categories' => ['feet', 'lovense']]);
+        Cam::factory()->create(['is_online' => true, 'categories' => ['lovense']]);
+
+        $this->withCookie(HomepageAbTest::COOKIE_NAME, 'grid')
+            ->get('/')
+            ->assertViewHas('cams', fn ($cams) => $cams->total() === 2);
+    }
+
+    public function test_feed_category_is_a_default_the_visitor_can_switch_away_from(): void
+    {
+        Cam::factory()->create(['is_online' => true, 'categories' => ['feet']]);
+        Cam::factory()->create(['is_online' => true, 'categories' => ['feet', 'anal']]);
+
+        $this->get('/feed?category=anal')->assertViewHas('cams', fn ($cams) => $cams->total() === 1);
+
+        // "All categories" submits an empty value — a real choice, not an
+        // absent one, so it clears the default rather than restoring it.
+        $this->get('/feed?category=')->assertViewHas('cams', fn ($cams) => $cams->total() === 2);
+    }
+
+    public function test_feed_shows_the_filter_bar_with_the_feet_category_selected(): void
+    {
+        Cam::factory()->create(['is_online' => true]);
+
+        $response = $this->get('/feed');
+
+        $response->assertSee('class="filters-bar"', false);
+
+        foreach (['category', 'age', 'hair', 'body'] as $param) {
+            $response->assertSee('name="'.$param.'"', false);
+        }
+
+        $response->assertSee('<option value="feet" selected>', false);
+    }
+
+    public function test_grid_filter_bar_also_starts_on_the_feet_category(): void
+    {
+        Cam::factory()->create(['is_online' => true]);
+
+        $this->withCookie(HomepageAbTest::COOKIE_NAME, 'grid')
+            ->get('/')
+            ->assertSee('<option value="feet" selected>', false);
+    }
+
+    public function test_feed_filter_bar_keeps_filters_it_does_not_render(): void
+    {
+        Cam::factory()->create(['is_online' => true, 'gender' => 'female']);
+
+        $this->get('/feed?gender=female')
+            ->assertSee('<input type="hidden" name="gender" value="female">', false);
+    }
+
+    public function test_header_navigation_is_present_on_the_feed(): void
+    {
+        Cam::factory()->create(['is_online' => true]);
+
+        $response = $this->get('/feed');
+
+        foreach (['Girls', 'Guys', 'Trans', 'Couples'] as $link) {
+            $response->assertSee($link, false);
+        }
+    }
+
     public function test_feed_page_is_indexable_and_in_the_sitemap(): void
     {
         $this->get('/feed')
