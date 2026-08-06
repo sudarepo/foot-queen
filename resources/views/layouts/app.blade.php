@@ -1,3 +1,20 @@
+@php
+    /**
+     * Cache-busted stylesheet URL.
+     *
+     * app.css is served straight out of /public — there's no Vite build for
+     * it, so nothing hashes the filename — and Cloudflare caches it for four
+     * hours under a cache key that never changes when the file does. A
+     * CSS-only deploy is therefore invisible until that TTL expires.
+     *
+     * That's worse than a stale tweak when a release renames classes: the
+     * new markup ships instantly while the old stylesheet keeps being
+     * served, and visitors get a completely unstyled page rather than an
+     * out-of-date one. Keying the URL on the file's own mtime gives every
+     * change its own cache entry, at both the edge and the browser.
+     */
+    $stylesheetUrl = asset('css/app.css').'?v='.(@filemtime(public_path('css/app.css')) ?: '0');
+@endphp
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -44,7 +61,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,700;9..144,900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ asset('css/app.css') }}">
+    <link rel="stylesheet" href="{{ $stylesheetUrl }}">
 
     @stack('head')
 </head>
