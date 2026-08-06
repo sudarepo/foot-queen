@@ -21,10 +21,14 @@
     @else
         <section class="cam-grid">
             @foreach ($cams as $cam)
-                <a href="{{ route('cams.redirect', [$cam, 'src' => 'grid']) }}"
-                   class="cam-card"
-                   target="_blank"
-                   rel="noopener nofollow">
+                {{-- Cards open the performer's page on our site (live cam +
+                     bio + pics & vids) rather than jumping straight to
+                     Chaturbate; `from` tells that page which listing to
+                     offer as the way back, and keeps the card click logged
+                     under 'grid' as it was before. Same tab, unlike the old
+                     outbound link — this is internal navigation now. --}}
+                <a href="{{ route('cams.show', ['cam' => $cam->username, 'from' => 'grid']) }}"
+                   class="cam-card">
                     <div class="cam-card__thumb">
                         @if ($cam->thumbnail_url)
                             <img src="{{ $cam->thumbnail_url }}"

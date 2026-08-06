@@ -13,11 +13,39 @@ class Cam extends Model
 
     protected $casts = [
         'categories' => 'array',
+        'profile_attributes' => 'array',
+        'photo_sets' => 'array',
         'is_online' => 'boolean',
         'is_hd' => 'boolean',
         'is_new' => 'boolean',
         'last_seen_at' => 'datetime',
+        'profile_fetched_at' => 'datetime',
     ];
+
+    /* ----------  Profile accessors  ---------- */
+
+    /**
+     * A single scalar from the fetched profile, e.g. `location`, `languages`.
+     */
+    public function profileAttribute(string $key): mixed
+    {
+        return $this->profile_attributes[$key] ?? null;
+    }
+
+    /**
+     * Photo/video sets, videos first — a video set is the stronger hook, and
+     * performers rarely order their own tab deliberately.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function orderedPhotoSets(): array
+    {
+        $sets = $this->photo_sets ?? [];
+
+        usort($sets, fn ($a, $b) => ($b['is_video'] ?? false) <=> ($a['is_video'] ?? false));
+
+        return $sets;
+    }
 
     /* ----------  Query scopes  ---------- */
 

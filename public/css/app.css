@@ -1194,3 +1194,524 @@ body {
     color: var(--text-muted);
     padding: 24px 0 48px;
 }
+
+/* ============================================
+   Performer profile page — /cam/{username}
+   ============================================ */
+
+/* Single column at phone width and widening from there. The page is a
+   vertical read — stage, bio, sets — so it never becomes a multi-column
+   layout; it just stops growing. */
+.profile {
+    max-width: 680px;
+    margin: 0 auto;
+    padding-bottom: 48px;
+}
+
+/* Only one thing can own the top of the viewport. On a profile the useful
+   one is "back to the listing", not the site header — and on a page whose
+   point is a video, giving the header's height back to the stage is the
+   right trade. The header is still there, just at the top of the document. */
+body.is-profile-page .site-header {
+    position: static;
+}
+
+/* ---------- Back to the listing ---------- */
+
+/* This page can run long once a bio and a dozen photo sets are on it, and
+   scrolling back up to escape is the quickest way to lose the visit — so the
+   way back is what sticks here.
+
+   It takes over the sticky slot from the site header (see the
+   `is-profile-page` rule below) rather than offsetting itself beneath it: on
+   phones the header wraps its nav onto a second row, so any fixed `top`
+   would be wrong at exactly the width it matters most. */
+.profile__back {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    margin: 0 -24px 12px;
+    padding: 10px 24px;
+    background: rgba(15, 11, 18, 0.9);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border);
+}
+
+.profile__back-link,
+.profile__foot-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    color: var(--text-dim);
+    transition: color 0.15s;
+}
+
+.profile__back-link:hover,
+.profile__foot-link:hover {
+    color: var(--accent-hot);
+}
+
+.profile__foot {
+    padding: 32px 0 8px;
+    text-align: center;
+}
+
+.profile__foot-link {
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 10px 20px;
+}
+
+.profile__foot-link:hover {
+    border-color: var(--accent);
+}
+
+/* ---------- Header ---------- */
+
+.profile__head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 4px 0 14px;
+}
+
+.profile__avatar {
+    width: 56px;
+    height: 56px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    padding: 2px;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hot) 100%);
+    display: block;
+}
+
+.profile__avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+    border: 2px solid var(--bg-card);
+    display: block;
+}
+
+.profile__headmeta {
+    flex: 1;
+    min-width: 0;
+}
+
+.profile__name {
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    line-height: 1.2;
+    color: #fff;
+    overflow-wrap: anywhere;
+}
+
+.profile__status {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 12px;
+    margin-top: 4px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.profile__live {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--live);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+}
+
+.profile__offline {
+    color: var(--text-muted);
+    letter-spacing: 0.06em;
+}
+
+.profile__badges {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+/* ---------- Live stage ---------- */
+
+/* 4:3 matches the source thumbnail, so swapping in the embed doesn't shift
+   the page. Full-bleed on phones — the video is the reason for the page. */
+.profile__stage {
+    position: relative;
+    display: block;
+    aspect-ratio: 4 / 3;
+    background: #000;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.profile__stage img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.profile__stage-placeholder {
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg, #1c1c22 0%, #2a2a36 100%);
+}
+
+.profile__stage--offline img {
+    filter: grayscale(0.7) brightness(0.5);
+}
+
+.profile__stage-plate,
+.profile__stage-hint {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.72);
+    backdrop-filter: blur(4px);
+    color: #fff;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--accent-hot);
+    pointer-events: none;
+    z-index: 1;
+}
+
+.profile__stage-plate {
+    top: 50%;
+    transform: translate(-50%, -50%);
+}
+
+.profile__stage-hint {
+    bottom: 12px;
+    transition: opacity 0.15s;
+}
+
+.profile__stage--live .profile__stage-hint {
+    opacity: 0;
+}
+
+/* No background of its own, unlike the feed's embed: the thumbnail stays
+   painted underneath, so a frame an ad blocker blanks out falls back to a
+   still of the room instead of a black rectangle. */
+.profile__stage-embed {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    z-index: 2;
+}
+
+.profile__stage-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    background: transparent;
+    cursor: pointer;
+}
+
+.profile__subject {
+    padding: 12px 2px 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-dim);
+}
+
+/* ---------- Primary CTA ---------- */
+
+.profile__cta {
+    display: block;
+    margin-top: 14px;
+    padding: 15px;
+    text-align: center;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 600;
+    font-size: 15px;
+    border-radius: 10px;
+    transition: background 0.15s, transform 0.15s;
+}
+
+.profile__cta:hover {
+    background: var(--accent-hot);
+}
+
+.profile__cta:active {
+    transform: translateY(1px);
+}
+
+.profile__tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-top: 14px;
+}
+
+.profile__tags .tag {
+    transition: border-color 0.15s, color 0.15s;
+}
+
+.profile__tags .tag:hover {
+    border-color: var(--accent);
+    color: var(--accent-hot);
+}
+
+/* ---------- Sections ---------- */
+
+.profile__section {
+    margin-top: 32px;
+}
+
+.profile__section-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 14px;
+}
+
+.profile__section-count {
+    font-size: 10px;
+    color: var(--accent-hot);
+    border: 1px solid var(--accent-dim);
+    border-radius: 999px;
+    padding: 1px 7px;
+}
+
+/* Two columns of label/value on phones, more as space allows. `auto-fit`
+   with a floor keeps a single long value ("Speaks: English, Русский,
+   Українська") from being squeezed into a sliver. */
+.profile__facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px 16px;
+}
+
+.profile__fact dt {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 2px;
+}
+
+.profile__fact dd {
+    font-size: 14px;
+    color: #f0ebf5;
+    overflow-wrap: anywhere;
+}
+
+.profile__bio {
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--text-dim);
+    overflow-wrap: anywhere;
+}
+
+.profile__bio p + p {
+    margin-top: 12px;
+}
+
+/* Long bios are clamped with a fade into a "show full bio" button. Applied
+   by script only (see the profile view), so a visitor without JS gets the
+   whole bio rather than a permanently truncated one. */
+.profile__bio.is-clamped {
+    max-height: 260px;
+    overflow: hidden;
+    -webkit-mask-image: linear-gradient(to bottom, #000 190px, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 190px, transparent 100%);
+}
+
+/* `display` here outranks the UA stylesheet's `[hidden] { display: none }`,
+   so the attribute has to be honored explicitly — otherwise the toggle shows
+   on every bio, including the short ones that are never clamped. */
+.profile__bio-toggle[hidden] {
+    display: none;
+}
+
+.profile__bio-toggle {
+    display: block;
+    margin-top: 10px;
+    padding: 8px 18px;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+}
+
+.profile__bio-toggle:hover {
+    border-color: var(--accent);
+    color: var(--accent-hot);
+}
+
+/* ---------- Pics & vids ---------- */
+
+/* Two per row on the narrowest phones, filling out to four on desktop. */
+.profile__sets {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 12px;
+}
+
+.photo-set {
+    display: block;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    transition: border-color 0.15s, transform 0.15s;
+}
+
+@media (hover: hover) {
+    .photo-set:hover {
+        border-color: var(--accent);
+        transform: translateY(-2px);
+    }
+}
+
+.photo-set__cover {
+    position: relative;
+    display: block;
+    aspect-ratio: 4 / 3;
+    background: #000;
+}
+
+.photo-set__cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.photo-set__play {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 38px;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-left: 3px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    color: #fff;
+    font-size: 13px;
+}
+
+.photo-set__duration {
+    position: absolute;
+    right: 6px;
+    bottom: 6px;
+    background: rgba(0, 0, 0, 0.75);
+    color: #fff;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.photo-set__meta {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 9px 10px 11px;
+}
+
+.photo-set__name {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    color: #f0ebf5;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.photo-set__price {
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    color: var(--accent-hot);
+}
+
+.profile__sets-note {
+    margin-top: 12px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--text-muted);
+}
+
+/* ---------- Phones ---------- */
+
+@media (max-width: 640px) {
+    /* The stage runs edge to edge; everything else keeps the page gutter.
+       `.site-main` supplies that gutter (24px), so the stage cancels it out. */
+    .profile__stage {
+        margin-left: -24px;
+        margin-right: -24px;
+        border-radius: 0;
+        border-left: 0;
+        border-right: 0;
+    }
+
+    .profile__name { font-size: 1.3rem; }
+
+    .profile__cta {
+        position: sticky;
+        bottom: 12px;
+        z-index: 30;
+        box-shadow: 0 8px 24px -6px rgba(0, 0, 0, 0.8);
+    }
+
+    .profile__sets {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+    }
+}
+
+/* Above the phone breakpoint the sticky back bar isn't earning its keep —
+   the viewport is tall enough that the header is rarely far away. */
+@media (min-width: 641px) {
+    .profile__back {
+        position: static;
+        background: none;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        border-bottom: 0;
+        margin: 0 0 14px;
+        padding: 8px 0;
+    }
+}
