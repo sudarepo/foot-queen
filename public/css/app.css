@@ -378,7 +378,30 @@ a { color: inherit; text-decoration: none; }
 .site-footer a { color: var(--text-dim); text-decoration: underline; }
 
 @media (max-width: 640px) {
-    .site-nav { display: none; }
+    /* Nav drops to its own full-width row under the logo rather than being
+       hidden — Girls/Guys/Trans/Couples are the only way across the network,
+       and on the feed there's no other navigation on screen at all. */
+    .site-header__inner {
+        flex-wrap: wrap;
+        gap: 10px;
+        padding: 12px 16px;
+    }
+
+    .site-nav {
+        display: flex;
+        order: 3;
+        width: 100%;
+        gap: 16px;
+        justify-content: space-between;
+        padding-top: 10px;
+        border-top: 1px solid var(--border);
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+
+    .site-nav::-webkit-scrollbar { display: none; }
+    .site-nav a { white-space: nowrap; }
+
     .filters { gap: 8px; }
     .filter select { min-width: 110px; font-size: 13px; }
     .cam-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
@@ -1104,6 +1127,63 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
     .ig-feed__more-spinner { animation-duration: 2s; }
+}
+
+/* ---------- Filter bar ---------- */
+
+/* Inside the feed the bar is scoped to the post column, so it lines up with
+   the cards instead of spanning the full page width. */
+.ig-feed .filters-bar {
+    border-top: 0;
+    padding-top: 0;
+    margin-bottom: 20px;
+}
+
+/* Centered only where the row is guaranteed to fit. Centering a row that
+   overflows pushes its first items past the left edge, where scrolling can't
+   reach them — on phones the bar starts flush-left and scrolls instead. */
+@media (min-width: 641px) {
+    .ig-feed .filters {
+        justify-content: center;
+    }
+}
+
+.filter-apply {
+    align-self: flex-end;
+    padding: 0.5rem 1rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: #fff;
+    font-family: var(--font-body);
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+/* Phones: one horizontally scrollable row of pills. The labels come off —
+   every select already reads as its own label ("Feet", "Any age", "Any
+   hair"), and the vertical space matters more on the feed. */
+@media (max-width: 640px) {
+    .filters-bar {
+        padding: 0.85rem 0;
+        margin-bottom: 1rem;
+    }
+
+    .filters {
+        flex-wrap: nowrap;
+        align-items: center;
+        overflow-x: auto;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .filters::-webkit-scrollbar { display: none; }
+
+    .filter,
+    .filter-reset,
+    .filter-apply { flex: 0 0 auto; }
+
+    .filter__label { display: none; }
 }
 
 .ig-feed__end {

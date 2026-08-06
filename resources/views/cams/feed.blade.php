@@ -20,7 +20,7 @@
     </div>
 
     <div class="ig-feed">
-        <div class="page-heading">
+        <div class="page-heading" style="display: none;">
             <h1>{{ $h1 ?? 'FootQueen — Live Feet Cams' }}</h1>
             <h2 class="page-heading__sub">The feed — every live cam, one scroll. Same performers as the <a href="{{ route('cams.index') }}">grid view</a>.</h2>
             <p class="page-heading__count">
@@ -31,6 +31,8 @@
                 strict privacy mode may block them. "Join the room" always works either way.
             </p>
         </div>
+
+        @include('cams._filters')
 
         @if ($cams->isEmpty())
             <div class="empty-state">

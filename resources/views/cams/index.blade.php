@@ -3,7 +3,7 @@
 @section('content')
     @include('cams._structured-data')
 
-    <div class="page-heading">
+    <div class="page-heading" style="display: none;">
         <h1>{{ $h1 ?? 'FootQueen — Live Feet Cams' }}</h1>
         <h2 class="page-heading__sub">Watch sexy feet, soles, toes, and foot worship cams streaming 24/7 from verified performers.</h2>
         <p class="page-heading__count">
@@ -11,27 +11,7 @@
         </p>
     </div>
 
-    <section class="filters-bar">
-        <form method="GET" action="{{ url()->current() }}" class="filters">
-            @foreach (['category' => 'category', 'age' => 'age', 'hair' => 'hair', 'body' => 'body'] as $paramName => $metaKey)
-                <label class="filter">
-                    <span class="filter__label">{{ ucfirst($paramName === 'age' ? 'Age' : $paramName) }}</span>
-                    <select name="{{ $paramName }}" onchange="this.form.submit()">
-                        @foreach ($filterMeta[$metaKey] as $value => $label)
-                            <option value="{{ $value }}"
-                                    @selected(($filters[$metaKey === 'age' ? 'age_range' : ($metaKey === 'hair' ? 'hair_color' : ($metaKey === 'body' ? 'body_type' : $metaKey))] ?? '') === $value)>
-                                {{ $label }}
-                            </option>
-                        @endforeach
-                    </select>
-                </label>
-            @endforeach
-
-            @if (!empty($filters))
-                <a href="{{ url()->current() }}" class="filter-reset">Clear ×</a>
-            @endif
-        </form>
-    </section>
+    @include('cams._filters')
 
     @if ($cams->isEmpty())
         <div class="empty-state">
