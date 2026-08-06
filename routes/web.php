@@ -17,6 +17,16 @@ Route::get('/', [CamController::class, 'index'])->name('cams.index');
  */
 Route::get('/feed', [CamController::class, 'feed'])->name('cams.feed');
 
+/*
+ * Performer profile pages — live room, bio, and pics & vids on our own URL.
+ * Bound on `username` rather than id so the URL is readable and stable; the
+ * outbound redirect below keeps binding on the primary key.
+ *
+ * Declared before the landing-page loop so a config slug can never shadow it.
+ */
+Route::get('/cam/{cam:username}', [CamController::class, 'show'])
+    ->name('cams.show');
+
 Route::get('/go/{cam}', [CamController::class, 'redirectToRoom'])
     ->name('cams.redirect');
 

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Cam;
 use App\Models\CamClickEvent;
 use App\Models\PageViewEvent;
+use App\Services\CamProfileService;
 use App\Services\HomepageAbTest;
 use App\Services\SeoPageResolver;
 use Illuminate\Http\JsonResponse;
@@ -12,7 +13,9 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Cookie;
+use Illuminate\Support\Str;
 use Illuminate\View\View;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
@@ -31,9 +34,16 @@ class CamController extends Controller
      */
     private const DEFAULT_CATEGORY = 'feet';
 
+    /**
+     * Listings a visitor can arrive at a profile from. Anything else in
+     * `?from=` is ignored rather than trusted into the analytics tables.
+     */
+    private const PROFILE_SOURCES = ['grid', 'feed'];
+
     public function __construct(
         private SeoPageResolver $seo,
         private HomepageAbTest $abTest,
+        private CamProfileService $profiles,
     ) {}
 
     /**
@@ -144,13 +154,106 @@ class CamController extends Controller
         );
     }
 
+    /**
+     * A performer's own page on our site: the live room embedded, plus the
+     * bio and the Pics & Vids tab pulled from Chaturbate (see
+     * CamProfileService). Everything on it that isn't navigation links out
+     * through /go/, so the affiliate credit is the same as a listing click.
+     *
+     * Offline performers still get a page — the bio and photo sets are the
+     * durable part, and a URL that 404s the moment someone stops streaming
+     * is no use to a visitor who bookmarked it or a crawler that indexed it.
+     */
+    public function show(Request $request, Cam $cam): View
+    {
+        $this->ensureProfileFetched($cam);
+
+        $source = $request->query('from');
+        $source = in_array($source, self::PROFILE_SOURCES, strict: true) ? $source : null;
+
+        if (! $this->abTest->isBot($request)) {
+            PageViewEvent::create(['page' => 'profile']);
+
+            // Arriving from a listing means a card on that listing was
+            // clicked — the click just lands here now instead of on
+            // Chaturbate. Logging it under the listing's own name keeps the
+            // grid-vs-feed CTR comparison measuring the same thing it did
+            // before profile pages existed. The onward click to Chaturbate
+            // is logged separately, under 'profile'.
+            if ($source !== null) {
+                CamClickEvent::create([
+                    'cam_id' => $cam->id,
+                    'source_page' => $source,
+                ]);
+            }
+        }
+
+        $title = $cam->is_online
+            ? "{$cam->username} — Live Feet Cam"
+            : "{$cam->username} — Feet Cam Profile, Pics & Videos";
+
+        return view('cams.show', [
+            'cam' => $cam,
+            'photoSets' => $cam->orderedPhotoSets(),
+            'backTo' => $source === 'feed' ? 'feed' : 'grid',
+            'totalOnline' => Cam::online()->count(),
+            'pageTitle' => $title,
+            'metaDesc' => $this->profileMetaDescription($cam),
+            'canonicalUrl' => route('cams.show', $cam->username),
+        ]);
+    }
+
+    /**
+     * First view of a performer's page fetches their profile inline, so the
+     * page is never bare just because the scheduled backfill
+     * (`cams:sync-profiles`) hasn't reached them yet. Only ever for cams
+     * never fetched before — once there's something to show, refreshing is
+     * the backfill's job and no visitor waits on it.
+     *
+     * The cache key is a stampede guard: several visitors (or a crawler
+     * working through the sitemap) hitting a cold page at once should
+     * produce one outbound request, not one each. Whoever loses the race
+     * renders without the profile rather than blocking on it.
+     */
+    private function ensureProfileFetched(Cam $cam): void
+    {
+        if (! $this->profiles->hasNeverBeenFetched($cam)) {
+            return;
+        }
+
+        if (! Cache::add("cam-profile-fetch:{$cam->id}", true, now()->addMinutes(5))) {
+            return;
+        }
+
+        $this->profiles->refresh($cam);
+    }
+
+    private function profileMetaDescription(Cam $cam): string
+    {
+        if (filled($cam->bio)) {
+            return Str::limit(preg_replace('/\s+/', ' ', $cam->bio) ?? '', 155);
+        }
+
+        $traits = array_filter([
+            $cam->age ? "{$cam->age}yo" : null,
+            $cam->hair_color,
+            $cam->body_type,
+        ]);
+
+        $description = "{$cam->username} — live feet and foot fetish cam";
+        $description .= $traits !== [] ? ' ('.implode(', ', $traits).').' : '.';
+
+        return $description.' Watch the live stream, browse photos and videos.';
+    }
+
     public function redirectToRoom(Request $request, Cam $cam): RedirectResponse
     {
-        // 'admin' covers the "Visit Room" action in the Filament cam
-        // resource, so those outbound clicks are tracked too, not just
-        // the public grid/feed pages.
+        // 'profile' is every outbound link on a performer's own page — the
+        // embed, the photo sets, the CTA. 'admin' covers the "Visit Room"
+        // action in the Filament cam resource, so those outbound clicks are
+        // tracked too, not just the public pages.
         $source = $request->query('src');
-        $source = in_array($source, ['grid', 'feed', 'admin'], strict: true) ? $source : 'grid';
+        $source = in_array($source, ['grid', 'feed', 'profile', 'admin'], strict: true) ? $source : 'grid';
 
         // The redirect itself always happens, bot or not — no reason to block
         // it. Only the click *log* is bot-gated, to match how page views are

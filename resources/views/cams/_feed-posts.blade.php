@@ -4,13 +4,15 @@
 @foreach ($cams as $cam)
     <article class="ig-post">
         <header class="ig-post__header">
-            <span class="ig-post__avatar">
+            {{-- Avatar + name open the performer's page, the way they do in
+                 the feed this layout borrows from. --}}
+            <a href="{{ route('cams.show', ['cam' => $cam->username, 'from' => 'feed']) }}" class="ig-post__avatar">
                 @if ($cam->thumbnail_url)
                     <img src="{{ $cam->thumbnail_url }}" alt="{{ $cam->username }}" loading="lazy">
                 @endif
-            </span>
+            </a>
             <div class="ig-post__headmeta">
-                <span class="ig-post__user">{{ $cam->username }}</span>
+                <a href="{{ route('cams.show', ['cam' => $cam->username, 'from' => 'feed']) }}" class="ig-post__user">{{ $cam->username }}</a>
                 <span class="ig-post__sub">
                     @if ($cam->hair_color){{ ucfirst($cam->hair_color) }}@endif
                     @if ($cam->body_type) &middot; {{ ucfirst($cam->body_type) }}@endif
@@ -20,10 +22,11 @@
             <span class="ig-post__live"><span class="live-dot"></span> LIVE</span>
         </header>
 
-        <a href="{{ route('cams.redirect', [$cam, 'src' => 'feed']) }}"
+        {{-- The thumbnail opens the performer's page on our site; the "Join
+             the room" CTA below stays a direct outbound link, so anyone who
+             has already decided still gets there in one click. --}}
+        <a href="{{ route('cams.show', ['cam' => $cam->username, 'from' => 'feed']) }}"
            class="ig-post__media"
-           target="_blank"
-           rel="noopener nofollow"
            @if ($cam->embed_url) data-embed-url="{{ $cam->embed_url }}" @endif>
             @if ($cam->thumbnail_url)
                 <img src="{{ $cam->thumbnail_url }}" alt="{{ $cam->username }}" loading="lazy">
