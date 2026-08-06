@@ -396,6 +396,24 @@ class CamProfilePageTest extends TestCase
         $this->get('/robots.txt')->assertSee('Allow: /cam/', false);
     }
 
+    /**
+     * app.css isn't built by Vite, so nothing hashes its filename, and
+     * Cloudflare caches it for four hours under a key that never changes.
+     * A release that renames classes then ships new markup against the old
+     * stylesheet — which is an unstyled page, not a stale one. This is what
+     * happened to the profile redesign, so the version marker is pinned.
+     */
+    public function test_the_stylesheet_url_is_busted_on_change(): void
+    {
+        $cam = $this->camWithProfile();
+
+        $expected = e(asset('css/app.css').'?v='.filemtime(public_path('css/app.css')));
+
+        foreach ([route('cams.show', $cam->username), '/feed', '/'] as $url) {
+            $this->get($url)->assertSee('<link rel="stylesheet" href="'.$expected.'">', false);
+        }
+    }
+
     public function test_listing_cards_link_to_profile_pages(): void
     {
         $cam = Cam::factory()->create(['username' => 'anna', 'is_online' => true]);
