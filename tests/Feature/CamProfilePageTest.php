@@ -297,7 +297,7 @@ class CamProfilePageTest extends TestCase
 
         $response = $this->get(route('cams.redirect', [$cam, 'src' => 'profile']));
 
-        $response->assertRedirect($cam->room_url.'?track=profile');
+        $response->assertRedirect($cam->room_url.'?track=profile-d');
         $this->assertDatabaseHas('cam_click_events', [
             'cam_id' => $cam->id,
             'source_page' => 'profile',

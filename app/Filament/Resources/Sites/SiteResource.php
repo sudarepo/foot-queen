@@ -13,6 +13,8 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Auth;
 
 /**
  * One record per domain this deploy serves.
@@ -40,6 +42,17 @@ class SiteResource extends Resource
     public static function table(Table $table): Table
     {
         return SitesTable::configure($table);
+    }
+
+    /**
+     * Non-admins see only the sites assigned to them (see Site::scopeAdministeredBy).
+     *
+     * This backs the record lookup on the edit page as well as the listing, so
+     * an unassigned site is a 404 by URL, not just an absent table row.
+     */
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()->administeredBy(Auth::user());
     }
 
     public static function getRelations(): array

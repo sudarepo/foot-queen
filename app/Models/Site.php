@@ -2,9 +2,13 @@
 
 namespace App\Models;
 
+use App\Services\DeviceDetector;
+use App\Services\HomepageLayout;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 
@@ -43,6 +47,8 @@ class Site extends Model
         'featured_categories' => 'array',
         'is_default' => 'boolean',
         'is_active' => 'boolean',
+        'home_layout_desktop' => HomepageLayout::class,
+        'home_layout_mobile' => HomepageLayout::class,
     ];
 
     protected static function booted(): void
@@ -62,6 +68,35 @@ class Site extends Model
         });
 
         static::deleted(fn () => static::flushRegistry());
+    }
+
+    /* ----------  Access  ---------- */
+
+    /**
+     * Panel users allowed to manage this site. Admins are not listed here —
+     * they reach every site (see App\Policies\SitePolicy).
+     *
+     * @return BelongsToMany<User, $this>
+     */
+    public function users(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class);
+    }
+
+    /**
+     * The sites a user may manage, as a query — everything for an admin, only
+     * the assigned rows for anyone else. Used to scope the Filament resource,
+     * so a scoped user can't reach another site's record by guessing its URL.
+     *
+     * @param  Builder<self>  $query
+     */
+    public function scopeAdministeredBy(Builder $query, User $user): void
+    {
+        if ($user->isAdmin()) {
+            return;
+        }
+
+        $query->whereHas('users', fn (Builder $users) => $users->whereKey($user->getKey()));
     }
 
     /* ----------  Resolution  ---------- */
@@ -223,6 +258,41 @@ class Site extends Model
             : config('cam-taxonomy.featured_categories', []);
     }
 
+    /* ----------  Homepage layout  ---------- */
+
+    /**
+     * What "/" serves this site's visitors on a given kind of screen — the
+     * 50/50 grid-vs-feed split, or one layout outright.
+     *
+     * Null-coalesced rather than trusted to the column default: the registry
+     * cache holds raw attribute rows, so an entry written before this shipped
+     * comes back without these keys at all, and "no answer" has to mean the
+     * behaviour the site had then — the split.
+     *
+     * @param  string  $device  A DeviceDetector::MOBILE / ::DESKTOP value.
+     */
+    public function homeLayout(string $device): HomepageLayout
+    {
+        $layout = $device === DeviceDetector::MOBILE
+            ? $this->home_layout_mobile
+            : $this->home_layout_desktop;
+
+        return $layout ?? HomepageLayout::AbTest;
+    }
+
+    /**
+     * Whether any visitor of this site can be shown the feed — false only
+     * when both devices are pinned to the grid, which is what keeps "/feed"
+     * out of the sitemap of a site that has switched the feed off.
+     */
+    public function servesFeed(): bool
+    {
+        return $this->homeLayout(DeviceDetector::MOBILE)->canServeFeed()
+            || $this->homeLayout(DeviceDetector::DESKTOP)->canServeFeed();
+    }
+
+    /* ----------  SEO  ---------- */
+
     /**
      * The registry under config/seo-pages/ backing this site's landing pages.
      */
@@ -232,13 +302,20 @@ class Site extends Model
     }
 
     /**
-     * The `track` sub-id sent to Chaturbate for an outbound click.
+     * The `track` sub-id sent to Chaturbate for an outbound click, shaped
+     * `[prefix-]source[-device]` — e.g. `grid-m`, or `bbw-feed-d`.
      *
      * Unprefixed sites report the bare source label, which is what Foot Queen
      * has always sent — keeping its historical affiliate stats continuous.
+     *
+     * The device suffix is a single letter (see DeviceDetector::abbreviate)
+     * because Chaturbate shows this value in a narrow dashboard column and
+     * the prefix and source already have to fit there.
      */
-    public function trackLabel(string $source): string
+    public function trackLabel(string $source, ?string $device = null): string
     {
-        return filled($this->track_prefix) ? "{$this->track_prefix}-{$source}" : $source;
+        $label = filled($this->track_prefix) ? "{$this->track_prefix}-{$source}" : $source;
+
+        return $device === null ? $label : $label.'-'.DeviceDetector::abbreviate($device);
     }
 }

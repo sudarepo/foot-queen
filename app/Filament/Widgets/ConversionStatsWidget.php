@@ -9,6 +9,7 @@ use Filament\Widgets\Concerns\InteractsWithPageFilters;
 use Filament\Widgets\StatsOverviewWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
 
 class ConversionStatsWidget extends StatsOverviewWidget
 {
@@ -28,8 +29,22 @@ class ConversionStatsWidget extends StatsOverviewWidget
         // deliberately opt-in rather than the default (see the filters form).
         $siteId = $this->pageFilters['site_id'] ?? null;
 
+        /**
+         * Filters arrive from the browser, so a user scoped to one site could
+         * otherwise read another domain's numbers by editing the select's
+         * value — or by clearing it and pooling the whole network. Null here
+         * means an admin, who is meant to see everything.
+         */
+        $siteIds = Auth::user()?->administeredSiteIds();
+
+        // Blank means both devices, which also keeps the rows logged before
+        // device tracking shipped (device null) in the picture.
+        $device = $this->pageFilters['device'] ?? null;
+
         $views = PageViewEvent::query()
             ->when($siteId, fn ($query) => $query->where('site_id', $siteId))
+            ->when($siteIds !== null, fn ($query) => $query->whereIn('site_id', $siteIds ?? []))
+            ->when($device, fn ($query) => $query->where('device', $device))
             ->when($from, fn ($query) => $query->whereDate('created_at', '>=', $from))
             ->when($until, fn ($query) => $query->whereDate('created_at', '<=', $until))
             ->selectRaw('page, count(*) as aggregate')
@@ -38,6 +53,8 @@ class ConversionStatsWidget extends StatsOverviewWidget
 
         $clicks = CamClickEvent::query()
             ->when($siteId, fn ($query) => $query->where('site_id', $siteId))
+            ->when($siteIds !== null, fn ($query) => $query->whereIn('site_id', $siteIds ?? []))
+            ->when($device, fn ($query) => $query->where('device', $device))
             ->when($from, fn ($query) => $query->whereDate('created_at', '>=', $from))
             ->when($until, fn ($query) => $query->whereDate('created_at', '<=', $until))
             ->selectRaw('source_page, count(*) as aggregate')
