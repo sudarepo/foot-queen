@@ -1,12 +1,18 @@
 <?php
 
 /**
- * SEO Landing Pages Registry
- * ===========================
+ * SEO Landing Pages Registry — "foot-queen"
+ * =========================================
  *
- * Every preset landing page lives here. This is the ONLY file you edit to add,
- * remove, or rename SEO pages. The router, the controller, the sitemap generator,
- * and the breadcrumb builder all read from this file.
+ * Every preset landing page for one registry lives here. This is the ONLY file
+ * you edit to add, remove, or rename SEO pages. The router, the controller, the
+ * sitemap generator, and the breadcrumb builder all read from this file.
+ *
+ * A site picks its registry by filename via the "SEO pages registry" field in
+ * Filament (Site::seoRegistry()), so a new niche is a new file in this folder
+ * — sites sharing a niche can point at the same one. Routes are registered for
+ * the union of every registry's slugs; a slug that isn't in the current site's
+ * registry 404s there, so /girls existing here doesn't make it exist elsewhere.
  *
  * Each entry's key is the slug path (what appears after the domain).
  *

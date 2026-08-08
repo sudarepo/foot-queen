@@ -27,6 +27,15 @@ class AdminPanelProvider extends PanelProvider
             ->default()
             ->id('admin')
             ->path('admin')
+            /**
+             * Optional: confine the panel to one host. Unset (the default),
+             * /admin answers on every domain in the `sites` table — fine while
+             * there's one, worth pinning once there are several.
+             */
+            ->when(
+                filled(config('app.admin_domain')),
+                fn (Panel $panel) => $panel->domain(config('app.admin_domain')),
+            )
             ->login()
             ->colors([
                 'primary' => Color::hex('#e85d22'), // matches the site's accent color

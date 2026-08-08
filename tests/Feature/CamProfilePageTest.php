@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Cam;
 use App\Models\CamClickEvent;
 use App\Models\PageViewEvent;
+use App\Services\HomepageAbTest;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -372,7 +373,12 @@ class CamProfilePageTest extends TestCase
             ->assertSee('anna');
     }
 
-    public function test_online_profiles_are_in_the_sitemap(): void
+    /**
+     * Offline profiles are real pages — the bio and photo sets outlive the
+     * stream — and a URL only advertised while its performer happens to be
+     * live is one a crawler mostly never sees.
+     */
+    public function test_every_profile_is_in_the_sitemap_online_or_not(): void
     {
         $online = Cam::factory()->create(['username' => 'anna', 'is_online' => true]);
         $offline = Cam::factory()->create(['username' => 'bea', 'is_online' => false]);
@@ -380,9 +386,22 @@ class CamProfilePageTest extends TestCase
         $response = $this->get('/sitemap.xml');
 
         $response->assertSee(route('cams.show', $online->username), false);
-        // Submitting a URL whose main content is a stream that isn't running
-        // invites a "crawled, not indexed" verdict.
-        $response->assertDontSee(route('cams.show', $offline->username), false);
+        $response->assertSee(route('cams.show', $offline->username), false);
+    }
+
+    public function test_live_profiles_outrank_offline_ones_in_the_sitemap(): void
+    {
+        Cam::factory()->create(['username' => 'anna', 'is_online' => true, 'viewers' => 10]);
+        Cam::factory()->create(['username' => 'bea', 'is_online' => false, 'viewers' => 900]);
+
+        $xml = $this->get('/sitemap.xml')->getContent();
+
+        $anna = strpos($xml, route('cams.show', 'anna'));
+        $bea = strpos($xml, route('cams.show', 'bea'));
+
+        $this->assertLessThan($bea, $anna, 'Online performers should be listed first.');
+        $this->assertStringContainsString("<changefreq>daily</changefreq>\n    <priority>0.3</priority>", $xml);
+        $this->assertStringContainsString("<changefreq>hourly</changefreq>\n    <priority>0.5</priority>", $xml);
     }
 
     public function test_profile_pages_are_indexable(): void
@@ -409,8 +428,14 @@ class CamProfilePageTest extends TestCase
 
         $expected = e(asset('css/app.css').'?v='.filemtime(public_path('css/app.css')));
 
+        // "/" is pinned to the grid variant. The test client sends a
+        // User-Agent of 'Symfony', which isn't bot-shaped, so an unpinned "/"
+        // takes the live 50/50 coin flip and redirects to /feed half the time
+        // — a redirect body has no stylesheet link in it.
         foreach ([route('cams.show', $cam->username), '/feed', '/'] as $url) {
-            $this->get($url)->assertSee('<link rel="stylesheet" href="'.$expected.'">', false);
+            $this->withCookie(HomepageAbTest::COOKIE_NAME, HomepageAbTest::VARIANT_GRID)
+                ->get($url)
+                ->assertSee('<link rel="stylesheet" href="'.$expected.'">', false);
         }
     }
 

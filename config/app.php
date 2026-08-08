@@ -56,6 +56,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Admin Panel Domain
+    |--------------------------------------------------------------------------
+    |
+    | One deploy serves every domain in the `sites` table, so without this the
+    | Filament panel answers on /admin of all of them — one login form per
+    | public domain, each a separate thing to notice being attacked. Set this
+    | to the single host the panel should respond on; leave it empty to keep
+    | the panel reachable on every domain.
+    |
+    */
+
+    'admin_domain' => env('ADMIN_DOMAIN'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Timezone
     |--------------------------------------------------------------------------
     |

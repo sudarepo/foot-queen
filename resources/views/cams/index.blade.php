@@ -4,8 +4,8 @@
     @include('cams._structured-data')
 
     <div class="page-heading" style="display: none;">
-        <h1>{{ $h1 ?? 'FootQueen — Live Feet Cams' }}</h1>
-        <h2 class="page-heading__sub">Watch sexy feet, soles, toes, and foot worship cams streaming 24/7 from verified performers.</h2>
+        <h1>{{ $h1 ?? $site->homeH1() }}</h1>
+        <h2 class="page-heading__sub">{{ $site->tagline }}</h2>
         <p class="page-heading__count">
             {{ number_format($cams->total()) }} cams online now
         </p>

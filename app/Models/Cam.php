@@ -13,6 +13,7 @@ class Cam extends Model
 
     protected $casts = [
         'categories' => 'array',
+        'tags' => 'array',
         'profile_attributes' => 'array',
         'photo_sets' => 'array',
         'is_online' => 'boolean',
@@ -52,6 +53,41 @@ class Cam extends Model
     public function scopeOnline($query)
     {
         return $query->where('is_online', true);
+    }
+
+    /**
+     * Narrows the shared pool to one site's slice of it.
+     *
+     * The cams table holds the union of every active site's niche — one sync
+     * run fetches all of them, and a performer tagged both 'feet' and 'bbw'
+     * is stored once and shown on both sites. This scope is what keeps those
+     * sites looking separate, so it has to be on *every* read path that
+     * reaches a visitor: listings, the online count in the header, and the
+     * sitemap. Miss one and a domain advertises another domain's performers.
+     *
+     * Deliberately not clearable from the UI, unlike the category filter — a
+     * visitor picking "All categories" is asking to leave the site's default
+     * category, not to leave the site.
+     */
+    public function scopeForSite($query, Site $site)
+    {
+        if (filled($site->gender)) {
+            $query->where('gender', $site->gender);
+        }
+
+        $tags = $site->tags ?? [];
+
+        // No tags means the site is defined by gender alone (or takes
+        // everything) — a niche-less site, not a site with an empty niche.
+        if ($tags !== []) {
+            $query->where(function ($query) use ($tags) {
+                foreach ($tags as $tag) {
+                    $query->orWhereJsonContains('tags', $tag);
+                }
+            });
+        }
+
+        return $query;
     }
 
     public function scopeFilter($query, array $filters)

@@ -2,6 +2,7 @@
 
 namespace App\Services\Providers;
 
+use App\Models\Site;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -25,9 +26,9 @@ class ChaturbateProvider implements CamProviderInterface
     private const PAGE_LIMIT = 500;   // API max
 
     /**
-     * Feet-related tags to search. The API only accepts one `tag` per
-     * request (comma-separating them is rejected outright — "Enter a valid
-     * value"), so each is fetched separately and merged.
+     * Search targets used when no site defines any — a fresh install, or one
+     * where every site has been deactivated. These are the tags Foot Queen
+     * ran on before sites were configurable.
      *
      * 'feet' alone already captures the vast majority of relevant content.
      * Checked empirically against the live API (2026-07-26, ~420 online
@@ -36,7 +37,9 @@ class ChaturbateProvider implements CamProviderInterface
      * 'feetworship' and 'pedicure' returned zero results. Included the two
      * that showed any signal; skipped the two that showed none.
      */
-    private const TAGS = ['feet', 'footfetish', 'toes'];
+    private const FALLBACK_TAGS = ['feet', 'footfetish', 'toes'];
+
+    private const FALLBACK_GENDER = 'f';
 
     public function getName(): string
     {
@@ -55,11 +58,13 @@ class ChaturbateProvider implements CamProviderInterface
         $campaign = config('cam-providers.chaturbate.campaign', 'default');
 
         // Keyed by username so a performer surfacing under more than one tag
-        // isn't processed twice.
+        // — or on more than one site — isn't processed twice. This is the
+        // whole point of syncing the union: the shared pool holds one row
+        // per performer no matter how many domains show them.
         $byUsername = [];
 
-        foreach (self::TAGS as $tag) {
-            foreach ($this->fetchTag($tag, $wm, $campaign) as $cam) {
+        foreach ($this->searchTargets() as $target) {
+            foreach ($this->fetchTarget($target, $wm, $campaign) as $cam) {
                 $byUsername[$cam['external_id']] = $cam;
             }
         }
@@ -68,12 +73,48 @@ class ChaturbateProvider implements CamProviderInterface
     }
 
     /**
-     * Paginate through every online room for a single tag.
+     * Every (gender, tag) pair any active site needs, deduplicated.
      *
+     * Two sites asking for the same tag cost one fetch, not two — and a
+     * deactivated site stops costing anything at all.
+     *
+     * @return array<int, array{gender: ?string, tag: ?string}>
+     */
+    private function searchTargets(): array
+    {
+        $genderCodes = array_flip(config('cam-taxonomy.gender', []));
+        $targets = [];
+
+        foreach (Site::query()->where('is_active', true)->get() as $site) {
+            $gender = filled($site->gender) ? ($genderCodes[$site->gender] ?? null) : null;
+
+            // A site with no tags is defined by gender alone, which is still
+            // a valid search — one request with no `tag` param.
+            $tags = $site->tags ?: [null];
+
+            foreach ($tags as $tag) {
+                $targets[$gender.'|'.$tag] = ['gender' => $gender, 'tag' => $tag];
+            }
+        }
+
+        if ($targets === []) {
+            foreach (self::FALLBACK_TAGS as $tag) {
+                $targets[self::FALLBACK_GENDER.'|'.$tag] = ['gender' => self::FALLBACK_GENDER, 'tag' => $tag];
+            }
+        }
+
+        return array_values($targets);
+    }
+
+    /**
+     * Paginate through every online room matching one search target.
+     *
+     * @param  array{gender: ?string, tag: ?string}  $target
      * @return array<int, array<string, mixed>>
      */
-    private function fetchTag(string $tag, string $wm, string $campaign): array
+    private function fetchTarget(array $target, string $wm, string $campaign): array
     {
+        $tag = $target['tag'];
         $all = [];
         $offset = 0;
         $total = null;
@@ -81,18 +122,21 @@ class ChaturbateProvider implements CamProviderInterface
         // Paginate: the v2 API returns `count` (total matching) and `results`.
         // There's no `next` field — we just increment offset until we've seen `count` rooms.
         while (true) {
-            $response = Http::timeout(30)->get(self::ENDPOINT, [
+            // Omit `gender`/`tag` rather than sending them empty — the API
+            // rejects a blank tag outright instead of treating it as "any".
+            $response = Http::timeout(30)->get(self::ENDPOINT, array_filter([
                 'wm' => $wm,
                 'client_ip' => 'request_ip',
                 'format' => 'json',
                 'limit' => self::PAGE_LIMIT,
                 'offset' => $offset,
-                'gender' => 'f',
+                'gender' => $target['gender'],
                 'tag' => $tag,
-            ]);
+            ], fn ($value) => $value !== null));
 
             if ($response->failed()) {
                 Log::error('Chaturbate API failed', [
+                    'gender' => $target['gender'],
                     'tag' => $tag,
                     'status' => $response->status(),
                     'body' => substr($response->body(), 0, 500),
@@ -175,7 +219,9 @@ class ChaturbateProvider implements CamProviderInterface
             }
         }
 
-        // Categories: intersect tags with our featured list.
+        // Categories: intersect tags with our featured list. The raw tags are
+        // kept alongside them — that's what Cam::scopeForSite() filters on, so
+        // a site's niche doesn't have to be in the featured list to work.
         $categories = array_values(array_intersect($tags, $taxonomy['featured_categories']));
 
         // Build the outbound room URL with our affiliate tracking.
@@ -198,6 +244,7 @@ class ChaturbateProvider implements CamProviderInterface
             'hair_color' => $hair,
             'body_type' => $body,
             'categories' => $categories,
+            'tags' => array_values($tags),
             'viewers' => (int) ($room['num_users'] ?? 0),
             'thumbnail_url' => $thumb,
             'room_url' => $roomUrl,

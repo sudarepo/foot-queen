@@ -40,4 +40,20 @@ class CamFactory extends Factory
             'last_seen_at' => now(),
         ];
     }
+
+    /**
+     * Mirror `categories` into the raw `tags` unless a test sets tags itself.
+     *
+     * Cam::scopeForSite() filters on `tags`, so without this every factory cam
+     * would fall outside every site. Running after the state is applied means
+     * a test overriding `categories` gets matching tags for free — which is
+     * how the real data looks anyway, `categories` being the curated subset
+     * of the tags the provider returned.
+     */
+    public function configure(): static
+    {
+        return $this->afterMaking(function (Cam $cam) {
+            $cam->tags ??= $cam->categories;
+        });
+    }
 }

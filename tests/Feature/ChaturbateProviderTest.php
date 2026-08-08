@@ -3,11 +3,19 @@
 namespace Tests\Feature;
 
 use App\Services\Providers\ChaturbateProvider;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class ChaturbateProviderTest extends TestCase
 {
+    /**
+     * The provider searches the union of every active site's tags, so it needs
+     * the sites table — the migration seeds foot-queen with the same three
+     * tags ('feet', 'footfetish', 'toes') the provider used to hardcode.
+     */
+    use RefreshDatabase;
+
     private function fakeRoom(array $overrides = []): array
     {
         return array_merge([

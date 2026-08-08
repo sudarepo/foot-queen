@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Cam;
 use App\Models\CamClickEvent;
 use App\Models\PageViewEvent;
+use App\Models\Site;
 use App\Services\CamProfileService;
 use App\Services\HomepageAbTest;
 use App\Services\SeoPageResolver;
@@ -22,19 +23,6 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 class CamController extends Controller
 {
     /**
-     * This is a foot-cam site, so both listings start on the foot category
-     * instead of everything the sync happens to have pulled in. The Chaturbate
-     * sync is already tag-scoped ('feet', 'footfetish', 'toes' — see
-     * ChaturbateProvider), but a performer pulled in under one of the narrower
-     * tags doesn't necessarily carry 'feet' in `categories`, so the listing
-     * applies the category itself rather than trusting the table.
-     *
-     * It's a default, not a lock: the category dropdown still switches away
-     * from it. See withDefaultCategory().
-     */
-    private const DEFAULT_CATEGORY = 'feet';
-
-    /**
      * Listings a visitor can arrive at a profile from. Anything else in
      * `?from=` is ignored rather than trusted into the analytics tables.
      */
@@ -45,6 +33,21 @@ class CamController extends Controller
         private HomepageAbTest $abTest,
         private CamProfileService $profiles,
     ) {}
+
+    /**
+     * The domain this request is being served on, bound by ResolveSite
+     * middleware from the host.
+     *
+     * Resolved per call and deliberately *not* constructor-injected: Laravel
+     * caches the controller instance on the Route object, which outlives a
+     * single request under any persistent runtime — Octane, and the test
+     * client. Injecting it would freeze whichever site happened to be
+     * resolved first and serve it to every other domain thereafter.
+     */
+    private function site(): Site
+    {
+        return app(Site::class);
+    }
 
     /**
      * Homepage. Real (non-bot) visitors are split 50/50 between the grid and
@@ -69,15 +72,15 @@ class CamController extends Controller
 
             // Logged here (not in a shared spot) so a "/" → "/feed" redirect
             // above only ever counts once, at whichever page actually renders.
-            PageViewEvent::create(['page' => HomepageAbTest::VARIANT_GRID]);
+            $this->logPageView(HomepageAbTest::VARIANT_GRID);
         }
 
         return $this->renderGrid(
             filters: $this->withDefaultCategory($request, $userFilters),
             userFilters: $userFilters,
-            h1: 'Live Feet Cams',
-            title: 'Live Feet Cams — Watch Free Foot Fetish Webcams Now',
-            meta: 'Feet, soles, and toes live on cam right now. Filter by age, hair color, body type, and more.',
+            h1: $this->site()->homeH1(),
+            title: $this->site()->homeTitle(),
+            meta: $this->site()->homeMeta(),
             canonicalUrl: url('/'),
         );
     }
@@ -90,8 +93,14 @@ class CamController extends Controller
     public function landing(Request $request): View
     {
         $slug = $request->route()->defaults['slug'] ?? null;
-        $page = $slug ? $this->seo->find($slug) : null;
+        $page = $slug ? $this->seo->find($this->site()->seoRegistry(), $slug) : null;
 
+        /**
+         * Routes exist for the union of every site's registry, so a slug can
+         * be perfectly valid — just not here. Treating "not in this site's
+         * registry" the same as "no such page" is what stops one domain's
+         * landing pages from resolving on another.
+         */
         if ($page === null) {
             throw new NotFoundHttpException('Unknown landing page.');
         }
@@ -140,15 +149,15 @@ class CamController extends Controller
         }
 
         if (! $this->abTest->isBot($request)) {
-            PageViewEvent::create(['page' => HomepageAbTest::VARIANT_FEED]);
+            $this->logPageView(HomepageAbTest::VARIANT_FEED);
         }
 
         return $this->renderGrid(
             filters: $filters,
             userFilters: $userFilters,
-            h1: 'Live Feet Cams',
-            title: 'Live Feet Cams — Watch Free Foot Fetish Webcams Now',
-            meta: 'Feet, soles, and toes live on cam right now. Scroll the feed and tap in.',
+            h1: $this->site()->homeH1(),
+            title: $this->site()->homeTitle(),
+            meta: $this->site()->feedMeta(),
             canonicalUrl: url('/feed'),
             view: 'cams.feed',
         );
@@ -166,13 +175,24 @@ class CamController extends Controller
      */
     public function show(Request $request, Cam $cam): View
     {
+        /**
+         * The pool is shared, the URL space isn't: a performer outside this
+         * site's niche has no page here, the same way they have no card in
+         * the listing. Without this, every domain would serve a profile for
+         * every performer in the pool — and the sitemap would be the only
+         * thing pretending otherwise.
+         */
+        if (! Cam::whereKey($cam->getKey())->forSite($this->site())->exists()) {
+            throw new NotFoundHttpException('This performer is not listed on this site.');
+        }
+
         $this->ensureProfileFetched($cam);
 
         $source = $request->query('from');
         $source = in_array($source, self::PROFILE_SOURCES, strict: true) ? $source : null;
 
         if (! $this->abTest->isBot($request)) {
-            PageViewEvent::create(['page' => 'profile']);
+            $this->logPageView('profile');
 
             // Arriving from a listing means a card on that listing was
             // clicked — the click just lands here now instead of on
@@ -181,22 +201,19 @@ class CamController extends Controller
             // before profile pages existed. The onward click to Chaturbate
             // is logged separately, under 'profile'.
             if ($source !== null) {
-                CamClickEvent::create([
-                    'cam_id' => $cam->id,
-                    'source_page' => $source,
-                ]);
+                $this->logCamClick($cam, $source);
             }
         }
 
         $title = $cam->is_online
-            ? "{$cam->username} — Live Feet Cam"
-            : "{$cam->username} — Feet Cam Profile, Pics & Videos";
+            ? "{$cam->username} — {$this->site()->profileTitleLive()}"
+            : "{$cam->username} — {$this->site()->profileTitleOffline()}";
 
         return view('cams.show', [
             'cam' => $cam,
             'photoSets' => $cam->orderedPhotoSets(),
             'backTo' => $source === 'feed' ? 'feed' : 'grid',
-            'totalOnline' => Cam::online()->count(),
+            'totalOnline' => $this->totalOnline(),
             'pageTitle' => $title,
             'metaDesc' => $this->profileMetaDescription($cam),
             'canonicalUrl' => route('cams.show', $cam->username),
@@ -240,7 +257,7 @@ class CamController extends Controller
             $cam->body_type,
         ]);
 
-        $description = "{$cam->username} — live feet and foot fetish cam";
+        $description = "{$cam->username} — {$this->site()->profileNoun()}";
         $description .= $traits !== [] ? ' ('.implode(', ', $traits).').' : '.';
 
         return $description.' Watch the live stream, browse photos and videos.';
@@ -264,13 +281,32 @@ class CamController extends Controller
         // practice — clicks with no bot filter at all, divided by views that
         // were already filtered.
         if (! $this->abTest->isBot($request)) {
-            CamClickEvent::create([
-                'cam_id' => $cam->id,
-                'source_page' => $source,
-            ]);
+            $this->logCamClick($cam, $source);
         }
 
         return redirect()->away($this->trackedRoomUrl($cam->room_url, $source));
+    }
+
+    /**
+     * Analytics events carry the domain they happened on. Without it the
+     * grid-vs-feed comparison pools every site's traffic into one sample and
+     * stops describing any actual page.
+     */
+    private function logPageView(string $page): void
+    {
+        PageViewEvent::create([
+            'site_id' => $this->site()->id,
+            'page' => $page,
+        ]);
+    }
+
+    private function logCamClick(Cam $cam, string $source): void
+    {
+        CamClickEvent::create([
+            'site_id' => $this->site()->id,
+            'cam_id' => $cam->id,
+            'source_page' => $source,
+        ]);
     }
 
     /**
@@ -282,6 +318,11 @@ class CamController extends Controller
      * feed revenue is visible in Chaturbate's own affiliate dashboard,
      * matching the `source_page` label used for our in-app click/view
      * analytics.
+     *
+     * The site prefixes that label (Site::trackLabel), because the pool is
+     * shared: the same performer's room is linked from every domain that
+     * matches their tags, and without the prefix every domain's revenue
+     * lands in the same three buckets.
      */
     private function trackedRoomUrl(string $roomUrl, string $source): string
     {
@@ -291,7 +332,7 @@ class CamController extends Controller
         }
 
         parse_str($parts['query'] ?? '', $query);
-        $query['track'] = $source;
+        $query['track'] = $this->site()->trackLabel($source);
 
         $scheme = $parts['scheme'] ?? 'https';
         $path = $parts['path'] ?? '/';
@@ -323,7 +364,7 @@ class CamController extends Controller
             'filters' => $filters,
             'userFilters' => $userFilters,
             'filterMeta' => $this->filterMeta(),
-            'totalOnline' => Cam::online()->count(),
+            'totalOnline' => $this->totalOnline(),
             'h1' => $h1,
             'pageTitle' => $title,
             'metaDesc' => $meta,
@@ -344,10 +385,20 @@ class CamController extends Controller
     private function onlineCams(array $filters): LengthAwarePaginator
     {
         return Cam::online()
+            ->forSite($this->site())
             ->filter($filters)
             ->orderByDesc('viewers')
             ->paginate(48)
             ->appends(Arr::except(request()->query(), ['page', 'partial']));
+    }
+
+    /**
+     * The "N live" figure in the header — this site's performers, not the
+     * whole shared pool.
+     */
+    private function totalOnline(): int
+    {
+        return Cam::online()->forSite($this->site())->count();
     }
 
     /**
@@ -356,12 +407,16 @@ class CamController extends Controller
      * Only fills in a category the visitor never expressed an opinion about.
      * Picking "All categories" in the filter bar submits an empty `category=`,
      * which is a deliberate choice — it clears the default rather than falling
-     * back to it, so the dropdown can actually leave the foot category.
+     * back to it, so the dropdown can actually leave the site's category.
+     *
+     * Clearing it never leaves the *site*, though: Cam::scopeForSite() applies
+     * the site's tags underneath regardless, so "All categories" on a foot
+     * site still means all foot categories.
      */
     private function withDefaultCategory(Request $request, array $filters): array
     {
-        if (! $request->has('category')) {
-            $filters['category'] = self::DEFAULT_CATEGORY;
+        if (! $request->has('category') && filled($this->site()->default_category)) {
+            $filters['category'] = $this->site()->default_category;
         }
 
         return $filters;
@@ -416,8 +471,8 @@ class CamController extends Controller
             'category' => array_merge(
                 ['' => 'All categories'],
                 array_combine(
-                    config('cam-taxonomy.featured_categories'),
-                    array_map('ucfirst', config('cam-taxonomy.featured_categories'))
+                    $this->site()->featuredCategories(),
+                    array_map('ucfirst', $this->site()->featuredCategories())
                 )
             ),
         ];
