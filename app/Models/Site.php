@@ -26,6 +26,14 @@ class Site extends Model
      */
     private const REGISTRY_CACHE_KEY = 'sites.registry';
 
+    /**
+     * Hydrated registry for the current request, so the repeated lookups in
+     * resolveForHost() don't re-hydrate models on every call.
+     *
+     * @var Collection<int, self>|null
+     */
+    private static ?Collection $registry = null;
+
     protected $guarded = [];
 
     protected $casts = [
@@ -77,18 +85,38 @@ class Site extends Model
     }
 
     /**
+     * Only raw attribute rows go through the cache — never the models
+     * themselves. `cache.serializable_classes` is false by default, so any
+     * object put into a serializing store (database, file, redis) comes back
+     * as __PHP_Incomplete_Class. Arrays survive; hydrate() turns them back
+     * into models with casts intact.
+     *
      * @return Collection<int, self>
      */
     public static function registry(): Collection
     {
-        return Cache::rememberForever(
+        if (static::$registry !== null) {
+            return static::$registry;
+        }
+
+        /** @var array<int, array<string, mixed>> $rows */
+        $rows = Cache::rememberForever(
             self::REGISTRY_CACHE_KEY,
-            fn () => static::query()->where('is_active', true)->orderByDesc('is_default')->get()
+            fn () => static::query()
+                ->where('is_active', true)
+                ->orderByDesc('is_default')
+                ->get()
+                ->map(fn (self $site) => $site->getRawOriginal())
+                ->all()
         );
+
+        return static::$registry = static::hydrate($rows);
     }
 
     public static function flushRegistry(): void
     {
+        static::$registry = null;
+
         Cache::forget(self::REGISTRY_CACHE_KEY);
     }
 
