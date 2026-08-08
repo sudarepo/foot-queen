@@ -9,6 +9,7 @@ use App\Models\Site;
 use App\Services\HomepageAbTest;
 use App\Services\Providers\ChaturbateProvider;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
@@ -391,5 +392,29 @@ class MultiSiteTest extends TestCase
         $this->assertInstanceOf(Site::class, $site);
         $this->assertSame($bbw->domains, $site->domains, 'Array casts must survive the round trip.');
         $this->assertTrue($site->exists, 'Hydrated sites must still be persisted models.');
+    }
+
+    /**
+     * A registry entry left behind by a release that cached the models
+     * themselves unserializes to __PHP_Incomplete_Class. It never expires, so
+     * it has to be thrown away on sight — otherwise every domain stays down
+     * until someone runs cache:clear by hand.
+     */
+    public function test_an_unusable_cached_registry_is_rebuilt_rather_than_fatal(): void
+    {
+        $bbw = $this->bbwSite();
+
+        // Flush first: planting the entry afterwards is what leaves the
+        // in-memory memo empty and the cache holding something unusable.
+        Site::flushRegistry();
+        Cache::forever('sites.registry', unserialize(
+            'O:8:"stdClass":0:{}',
+            ['allowed_classes' => false]
+        ));
+
+        $this->assertNotNull(
+            Site::registry()->firstWhere('slug', $bbw->slug),
+            'A junk cache entry must be replaced by a freshly queried registry.'
+        );
     }
 }
