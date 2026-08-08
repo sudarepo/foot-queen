@@ -91,6 +91,11 @@ class Site extends Model
      * as __PHP_Incomplete_Class. Arrays survive; hydrate() turns them back
      * into models with casts intact.
      *
+     * Anything else in there — an entry written by an older release, or by any
+     * future change that forgets this rule — is discarded and rebuilt rather
+     * than allowed to take the site down. `rememberForever` never expires on
+     * its own, so without this a single bad entry is permanent.
+     *
      * @return Collection<int, self>
      */
     public static function registry(): Collection
@@ -99,17 +104,20 @@ class Site extends Model
             return static::$registry;
         }
 
-        /** @var array<int, array<string, mixed>> $rows */
-        $rows = Cache::rememberForever(
-            self::REGISTRY_CACHE_KEY,
-            fn () => static::query()
+        $rows = Cache::get(self::REGISTRY_CACHE_KEY);
+
+        if (! is_array($rows)) {
+            $rows = static::query()
                 ->where('is_active', true)
                 ->orderByDesc('is_default')
                 ->get()
                 ->map(fn (self $site) => $site->getRawOriginal())
-                ->all()
-        );
+                ->all();
 
+            Cache::forever(self::REGISTRY_CACHE_KEY, $rows);
+        }
+
+        /** @var array<int, array<string, mixed>> $rows */
         return static::$registry = static::hydrate($rows);
     }
 
