@@ -363,4 +363,33 @@ class MultiSiteTest extends TestCase
         $this->assertSame(['feet', 'pawg'], $cams[0]['tags']);
         $this->assertSame(['feet'], $cams[0]['categories']);
     }
+
+    /**
+     * The registry is cached, and every production cache store serializes.
+     * `cache.serializable_classes` is false by default, so anything that puts
+     * an object in there gets __PHP_Incomplete_Class back and every request
+     * 500s — which the array store used by the rest of the suite can't show,
+     * because it never serializes at all.
+     */
+    public function test_the_registry_round_trips_through_a_serializing_cache_store(): void
+    {
+        config([
+            'cache.default' => 'file',
+            'cache.stores.file.path' => storage_path('framework/testing/cache-'.uniqid()),
+        ]);
+
+        $bbw = $this->bbwSite();
+        Site::flushRegistry();
+
+        // First call populates the cache, second reads back what was written.
+        Site::registry();
+        Site::flushRegistry();
+        $registry = Site::registry();
+
+        $site = $registry->firstWhere('slug', $bbw->slug);
+
+        $this->assertInstanceOf(Site::class, $site);
+        $this->assertSame($bbw->domains, $site->domains, 'Array casts must survive the round trip.');
+        $this->assertTrue($site->exists, 'Hydrated sites must still be persisted models.');
+    }
 }
