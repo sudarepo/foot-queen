@@ -7,6 +7,7 @@ use App\Models\CamClickEvent;
 use App\Models\PageViewEvent;
 use App\Models\Site;
 use App\Services\CamProfileService;
+use App\Services\DeviceDetector;
 use App\Services\HomepageAbTest;
 use App\Services\SeoPageResolver;
 use Illuminate\Http\JsonResponse;
@@ -32,6 +33,7 @@ class CamController extends Controller
         private SeoPageResolver $seo,
         private HomepageAbTest $abTest,
         private CamProfileService $profiles,
+        private DeviceDetector $devices,
     ) {}
 
     /**
@@ -50,17 +52,22 @@ class CamController extends Controller
     }
 
     /**
-     * Homepage. Real (non-bot) visitors are split 50/50 between the grid and
-     * the feed variant via HomepageAbTest — the assignment is remembered by
-     * cookie so it's consistent on repeat visits. Bots always see the grid
-     * here with no cookie and no redirect, so this never affects SEO/crawling.
+     * Homepage. What a real (non-bot) visitor gets is the site's call, per
+     * device (see HomepageLayout): the 50/50 grid-vs-feed split — remembered
+     * by cookie so it's consistent on repeat visits — or one layout outright
+     * for a site that has finished testing on that kind of screen.
+     *
+     * Bots always see the grid here with no cookie and no redirect whatever
+     * the site is set to, so none of this affects SEO/crawling.
      */
     public function index(Request $request): View|RedirectResponse
     {
         $userFilters = $this->parseFilters($request);
 
         if (! $this->abTest->isBot($request)) {
-            [$variant, $isNewAssignment] = $this->abTest->resolve($request);
+            $layout = $this->site()->homeLayout($this->devices->detect($request));
+
+            [$variant, $isNewAssignment] = $this->abTest->resolve($request, $layout);
 
             if ($isNewAssignment) {
                 Cookie::queue(HomepageAbTest::COOKIE_NAME, $variant, $this->abTest->cookieMinutes());
@@ -72,7 +79,7 @@ class CamController extends Controller
 
             // Logged here (not in a shared spot) so a "/" → "/feed" redirect
             // above only ever counts once, at whichever page actually renders.
-            $this->logPageView(HomepageAbTest::VARIANT_GRID);
+            $this->logPageView(HomepageAbTest::VARIANT_GRID, $request);
         }
 
         return $this->renderGrid(
@@ -149,7 +156,7 @@ class CamController extends Controller
         }
 
         if (! $this->abTest->isBot($request)) {
-            $this->logPageView(HomepageAbTest::VARIANT_FEED);
+            $this->logPageView(HomepageAbTest::VARIANT_FEED, $request);
         }
 
         return $this->renderGrid(
@@ -192,7 +199,7 @@ class CamController extends Controller
         $source = in_array($source, self::PROFILE_SOURCES, strict: true) ? $source : null;
 
         if (! $this->abTest->isBot($request)) {
-            $this->logPageView('profile');
+            $this->logPageView('profile', $request);
 
             // Arriving from a listing means a card on that listing was
             // clicked — the click just lands here now instead of on
@@ -201,7 +208,7 @@ class CamController extends Controller
             // before profile pages existed. The onward click to Chaturbate
             // is logged separately, under 'profile'.
             if ($source !== null) {
-                $this->logCamClick($cam, $source);
+                $this->logCamClick($cam, $source, $request);
             }
         }
 
@@ -280,30 +287,36 @@ class CamController extends Controller
         // view, which is exactly what produced a 1200%+ CTR on grid in
         // practice — clicks with no bot filter at all, divided by views that
         // were already filtered.
+        $device = $this->devices->detect($request);
+
         if (! $this->abTest->isBot($request)) {
-            $this->logCamClick($cam, $source);
+            $this->logCamClick($cam, $source, $request);
         }
 
-        return redirect()->away($this->trackedRoomUrl($cam->room_url, $source));
+        return redirect()->away($this->trackedRoomUrl($cam->room_url, $source, $device));
     }
 
     /**
-     * Analytics events carry the domain they happened on. Without it the
-     * grid-vs-feed comparison pools every site's traffic into one sample and
-     * stops describing any actual page.
+     * Analytics events carry the domain they happened on, and the kind of
+     * screen they happened on. Without the site the grid-vs-feed comparison
+     * pools every domain's traffic into one sample and stops describing any
+     * actual page; without the device it pools a 390px feed with a 1440px
+     * grid, where a variant can win on one and lose on the other.
      */
-    private function logPageView(string $page): void
+    private function logPageView(string $page, Request $request): void
     {
         PageViewEvent::create([
             'site_id' => $this->site()->id,
+            'device' => $this->devices->detect($request),
             'page' => $page,
         ]);
     }
 
-    private function logCamClick(Cam $cam, string $source): void
+    private function logCamClick(Cam $cam, string $source, Request $request): void
     {
         CamClickEvent::create([
             'site_id' => $this->site()->id,
+            'device' => $this->devices->detect($request),
             'cam_id' => $cam->id,
             'source_page' => $source,
         ]);
@@ -322,9 +335,12 @@ class CamController extends Controller
      * The site prefixes that label (Site::trackLabel), because the pool is
      * shared: the same performer's room is linked from every domain that
      * matches their tags, and without the prefix every domain's revenue
-     * lands in the same three buckets.
+     * lands in the same three buckets. The device is suffixed for the same
+     * reason our own events carry it — phone and desktop traffic convert
+     * differently, and the affiliate dashboard is where the *revenue* half
+     * of that difference shows up.
      */
-    private function trackedRoomUrl(string $roomUrl, string $source): string
+    private function trackedRoomUrl(string $roomUrl, string $source, string $device): string
     {
         $parts = parse_url($roomUrl);
         if ($parts === false || empty($parts['host'])) {
@@ -332,7 +348,7 @@ class CamController extends Controller
         }
 
         parse_str($parts['query'] ?? '', $query);
-        $query['track'] = $this->site()->trackLabel($source);
+        $query['track'] = $this->site()->trackLabel($source, $device);
 
         $scheme = $parts['scheme'] ?? 'https';
         $path = $parts['path'] ?? '/';

@@ -41,13 +41,23 @@ class SitemapController extends Controller
                 'changefreq' => 'hourly',
                 'priority' => '1.0',
             ],
-            [
+        ];
+
+        /**
+         * "/feed" stays a working URL whatever the site is set to — it may be
+         * indexed, bookmarked, or linked from a profile page's back link —
+         * but a site that has pinned every device to the grid has switched
+         * the feed off, and there's no reason to keep advertising a layout it
+         * no longer sends anyone to.
+         */
+        if ($this->site()->servesFeed()) {
+            $urls[] = [
                 'loc' => url('/feed'),
                 'lastmod' => $today,
                 'changefreq' => 'hourly',
                 'priority' => '0.6',
-            ],
-        ];
+            ];
+        }
 
         // Only include canonical URLs. Aliases (e.g. /blonde/ when /girls/blonde/
         // is canonical) are intentionally excluded so Google doesn't index duplicates.

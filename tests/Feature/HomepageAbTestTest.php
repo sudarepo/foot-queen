@@ -3,7 +3,9 @@
 namespace Tests\Feature;
 
 use App\Models\PageViewEvent;
+use App\Models\Site;
 use App\Services\HomepageAbTest;
+use App\Services\HomepageLayout;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -80,5 +82,130 @@ class HomepageAbTestTest extends TestCase
 
         $this->assertSame(1, PageViewEvent::count());
         $this->assertDatabaseHas('page_view_events', ['page' => 'feed']);
+    }
+
+    /* ----------  Per-site, per-device layout  ---------- */
+
+    private const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+
+    private const DESKTOP_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+    /**
+     * Pins the site every test request resolves to (the seeded default).
+     */
+    private function pinLayouts(HomepageLayout $desktop, HomepageLayout $mobile): void
+    {
+        Site::query()->where('is_default', true)->firstOrFail()->update([
+            'home_layout_desktop' => $desktop,
+            'home_layout_mobile' => $mobile,
+        ]);
+    }
+
+    public function test_a_site_pinned_to_the_grid_overrides_a_visitors_feed_cookie(): void
+    {
+        $this->pinLayouts(HomepageLayout::Grid, HomepageLayout::Grid);
+
+        $response = $this->withHeader('User-Agent', self::DESKTOP_UA)
+            ->withCookie(HomepageAbTest::COOKIE_NAME, HomepageAbTest::VARIANT_FEED)
+            ->get('/');
+
+        $response->assertOk();
+        $response->assertViewIs('cams.index');
+        $this->assertDatabaseHas('page_view_events', ['page' => 'grid']);
+    }
+
+    public function test_a_site_pinned_to_the_feed_overrides_a_visitors_grid_cookie(): void
+    {
+        $this->pinLayouts(HomepageLayout::Feed, HomepageLayout::Feed);
+
+        $this->withHeader('User-Agent', self::DESKTOP_UA)
+            ->withCookie(HomepageAbTest::COOKIE_NAME, HomepageAbTest::VARIANT_GRID)
+            ->get('/')
+            ->assertRedirect(route('cams.feed'));
+    }
+
+    public function test_a_pinned_layout_issues_no_assignment_cookie(): void
+    {
+        $this->pinLayouts(HomepageLayout::Grid, HomepageLayout::Grid);
+
+        $this->withHeader('User-Agent', self::DESKTOP_UA)
+            ->get('/')
+            ->assertCookieMissing(HomepageAbTest::COOKIE_NAME);
+    }
+
+    public function test_the_layout_is_chosen_per_device(): void
+    {
+        $this->pinLayouts(desktop: HomepageLayout::Grid, mobile: HomepageLayout::Feed);
+
+        $this->withHeader('User-Agent', self::DESKTOP_UA)->get('/')
+            ->assertOk()
+            ->assertViewIs('cams.index');
+
+        $this->withHeader('User-Agent', self::IPHONE_UA)->get('/')
+            ->assertRedirect(route('cams.feed'));
+    }
+
+    public function test_client_hints_decide_the_device_where_the_browser_sends_them(): void
+    {
+        $this->pinLayouts(desktop: HomepageLayout::Grid, mobile: HomepageLayout::Feed);
+
+        // A desktop-shaped user agent, but the browser itself says phone.
+        $this->withHeader('User-Agent', self::DESKTOP_UA)
+            ->withHeader('Sec-CH-UA-Mobile', '?1')
+            ->get('/')
+            ->assertRedirect(route('cams.feed'));
+    }
+
+    public function test_one_device_can_keep_testing_while_the_other_is_pinned(): void
+    {
+        $this->pinLayouts(desktop: HomepageLayout::AbTest, mobile: HomepageLayout::Grid);
+
+        // The same visitor, carrying the same assignment cookie, on each kind
+        // of screen: desktop is still an experiment so the cookie decides,
+        // mobile is settled so the site does.
+        $this->withCookie(HomepageAbTest::COOKIE_NAME, HomepageAbTest::VARIANT_FEED);
+
+        $this->withHeader('User-Agent', self::DESKTOP_UA)
+            ->get('/')
+            ->assertRedirect(route('cams.feed'));
+
+        $this->withHeader('User-Agent', self::IPHONE_UA)
+            ->get('/')
+            ->assertOk()
+            ->assertViewIs('cams.index')
+            ->assertCookieMissing(HomepageAbTest::COOKIE_NAME);
+    }
+
+    public function test_bots_still_get_the_grid_at_the_homepage_when_the_site_is_pinned_to_the_feed(): void
+    {
+        $this->pinLayouts(HomepageLayout::Feed, HomepageLayout::Feed);
+
+        $response = $this->withHeader('User-Agent', self::BOT_UA)->get('/');
+
+        $response->assertOk();
+        $response->assertViewIs('cams.index');
+        $this->assertSame(0, PageViewEvent::count());
+    }
+
+    public function test_the_feed_url_keeps_working_when_the_site_is_pinned_to_the_grid(): void
+    {
+        $this->pinLayouts(HomepageLayout::Grid, HomepageLayout::Grid);
+
+        // Indexed and bookmarked URLs don't stop existing because the site
+        // stopped sending visitors to them.
+        $this->withHeader('User-Agent', self::DESKTOP_UA)->get('/feed')
+            ->assertOk()
+            ->assertViewIs('cams.feed');
+    }
+
+    public function test_the_sitemap_drops_the_feed_only_when_no_device_can_reach_it(): void
+    {
+        $this->get('/sitemap.xml')->assertOk()->assertSee(url('/feed'), false);
+
+        $this->pinLayouts(desktop: HomepageLayout::Grid, mobile: HomepageLayout::AbTest);
+        $this->get('/sitemap.xml')->assertOk()->assertSee(url('/feed'), false);
+
+        $this->pinLayouts(HomepageLayout::Grid, HomepageLayout::Grid);
+        $this->get('/sitemap.xml')->assertOk()->assertDontSee(url('/feed'), false);
     }
 }

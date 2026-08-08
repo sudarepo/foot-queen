@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Services\HomepageAbTest;
+use App\Services\HomepageLayout;
 use Illuminate\Http\Request;
 use Tests\TestCase;
 
@@ -71,6 +72,38 @@ class HomepageAbTestServiceTest extends TestCase
         // A tampered/garbage cookie value is treated the same as no cookie at all.
         $request = Request::create('/', 'GET', cookies: [HomepageAbTest::COOKIE_NAME => 'nonsense']);
         [$variant, $isNew] = $service->resolve($request);
+        $this->assertContains($variant, ['grid', 'feed']);
+        $this->assertTrue($isNew);
+    }
+
+    public function test_a_pinned_layout_wins_over_any_cookie_and_assigns_nothing(): void
+    {
+        $service = new HomepageAbTest;
+
+        $request = Request::create('/', 'GET', cookies: [HomepageAbTest::COOKIE_NAME => 'feed']);
+        $this->assertSame(['grid', false], $service->resolve($request, HomepageLayout::Grid));
+
+        $request = Request::create('/', 'GET', cookies: [HomepageAbTest::COOKIE_NAME => 'grid']);
+        $this->assertSame(['feed', false], $service->resolve($request, HomepageLayout::Feed));
+    }
+
+    public function test_a_pinned_layout_is_served_to_a_visitor_with_no_cookie_at_all(): void
+    {
+        $service = new HomepageAbTest;
+
+        // Never "assigned": pinning isn't an experiment arm, so there's
+        // nothing to remember — and nothing to seed a later experiment with.
+        $this->assertSame(['feed', false], $service->resolve(Request::create('/'), HomepageLayout::Feed));
+    }
+
+    public function test_the_ab_test_layout_splits_exactly_as_it_did_before(): void
+    {
+        $service = new HomepageAbTest;
+
+        $request = Request::create('/', 'GET', cookies: [HomepageAbTest::COOKIE_NAME => 'feed']);
+        $this->assertSame(['feed', false], $service->resolve($request, HomepageLayout::AbTest));
+
+        [$variant, $isNew] = $service->resolve(Request::create('/'), HomepageLayout::AbTest);
         $this->assertContains($variant, ['grid', 'feed']);
         $this->assertTrue($isNew);
     }

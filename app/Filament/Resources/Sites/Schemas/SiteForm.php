@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Sites\Schemas;
 
+use App\Services\HomepageLayout;
 use Filament\Forms\Components\ColorPicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Repeater;
@@ -13,9 +14,11 @@ use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
+use Filament\Schemas\Components\Text;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 
 /**
@@ -36,6 +39,7 @@ class SiteForm
                     ->tabs([
                         self::identityTab(),
                         self::brandingTab(),
+                        self::layoutTab(),
                         self::contentTab(),
                         self::copyTab(),
                         self::trackingTab(),
@@ -68,6 +72,7 @@ class SiteForm
                     ->maxLength(64)
                     ->alphaDash()
                     ->unique(ignoreRecord: true)
+                    ->disabled(self::isNotAdmin(...))
                     ->helperText('Internal key — used for asset folders and as the default SEO registry name. Avoid changing it once the site is live.'),
 
                 Repeater::make('domains')
@@ -78,6 +83,7 @@ class SiteForm
                             ->helperText(false)
                             ->placeholder('example.com')
                     )
+                    ->disabled(self::isNotAdmin(...))
                     ->helperText('Hostnames that serve this site — no scheme, no port. Include local dev hosts (e.g. mysite.test) so the site resolves while you work on it.')
                     ->addActionLabel('Add domain')
                     ->columnSpanFull(),
@@ -86,13 +92,27 @@ class SiteForm
                     Toggle::make('is_active')
                         ->label('Active')
                         ->default(true)
+                        ->disabled(self::isNotAdmin(...))
                         ->helperText('Inactive sites stop resolving and stop contributing their tags to the sync, so a parked domain costs nothing.'),
 
                     Toggle::make('is_default')
                         ->label('Default site')
+                        ->disabled(self::isNotAdmin(...))
                         ->helperText('Serves any host that matches no other site — a bare IP, a preview URL, a domain pointed here before it has a record. Turning this on turns it off everywhere else.'),
                 ]),
             ]);
+    }
+
+    /**
+     * Which host serves which site, and which site catches everything else,
+     * is network-level wiring rather than site content: a user assigned one
+     * site could otherwise claim another site's domain, or make theirs the
+     * default and swallow every unmatched request. Disabled fields aren't
+     * dehydrated, so this holds against a tampered form submission too.
+     */
+    private static function isNotAdmin(): bool
+    {
+        return ! Auth::user()?->isAdmin();
     }
 
     private static function brandingTab(): Tab
@@ -138,6 +158,42 @@ class SiteForm
                     ->addActionLabel('Add link')
                     ->reorderable()
                     ->columnSpanFull(),
+            ]);
+    }
+
+    /**
+     * What "/" serves, per kind of screen.
+     *
+     * Two selects rather than one because the answer genuinely differs by
+     * device — the feed is a phone-shaped layout — and a site that has
+     * settled on it for mobile shouldn't have to stop testing on desktop to
+     * say so.
+     */
+    private static function layoutTab(): Tab
+    {
+        return Tab::make('Homepage layout')
+            ->icon('heroicon-o-squares-2x2')
+            ->schema([
+                Grid::make(2)->schema([
+                    Select::make('home_layout_desktop')
+                        ->label('Desktop visitors')
+                        ->options(HomepageLayout::options())
+                        ->default(HomepageLayout::AbTest->value)
+                        ->selectablePlaceholder(false)
+                        ->required(),
+
+                    Select::make('home_layout_mobile')
+                        ->label('Mobile visitors')
+                        ->options(HomepageLayout::options())
+                        ->default(HomepageLayout::AbTest->value)
+                        ->selectablePlaceholder(false)
+                        ->required(),
+                ]),
+
+                Text::make('A/B test splits real visitors 50/50 between the two layouts and remembers each visitor\'s side by cookie — that\'s what fills the A/B Test dashboard. Pick a single layout once that dashboard has told you which one wins for this site: everyone on that kind of screen then gets it, cookie or no cookie, and the split stops.'),
+
+                Text::make('Search engines are unaffected either way — crawlers always get the grid at "/" and never a redirect, whatever is set here. "/feed" also stays reachable for anyone who has it bookmarked or indexed; setting both devices to "Grid only" simply stops sending visitors there, and drops it from this site\'s sitemap.')
+                    ->color('gray'),
             ]);
     }
 
@@ -243,7 +299,7 @@ class SiteForm
             ->schema([
                 TextInput::make('track_prefix')
                     ->maxLength(32)
-                    ->helperText('Prefixes the `track` sub-id on outbound Chaturbate links, so this domain\'s revenue is separable in the affiliate dashboard: "fq" sends fq-grid, fq-feed, fq-profile. Leave empty to send the bare source label — which is what an existing site already reports, so changing it breaks continuity with its history.')
+                    ->helperText('Prefixes the `track` sub-id on outbound Chaturbate links, so this domain\'s revenue is separable in the affiliate dashboard: "fq" sends fq-grid-m, fq-feed-d, fq-profile-m … The trailing letter is the visitor\'s device (m = mobile, d = desktop). Leave empty to send the bare source label — which is what an existing site already reports, so changing it breaks continuity with its history.')
                     ->columnSpanFull(),
 
                 TextInput::make('ga_measurement_id')

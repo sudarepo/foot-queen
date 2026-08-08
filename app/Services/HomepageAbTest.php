@@ -11,6 +11,9 @@ use Illuminate\Http\Request;
  * entirely — Googlebot etc. always sees the canonical grid at "/", so this
  * never affects indexing, and their traffic never pollutes the conversion
  * numbers.
+ *
+ * Whether a given visitor is split at all is the site's call, per device —
+ * see HomepageLayout and Site::homeLayout().
  */
 class HomepageAbTest
 {
@@ -49,10 +52,22 @@ class HomepageAbTest
      * Resolves the variant for this visitor, honoring an existing cookie if
      * present, otherwise assigning one at random.
      *
+     * A site that has pinned this device to one layout (see HomepageLayout)
+     * short-circuits all of that: the pinned variant wins over any cookie the
+     * visitor is carrying, and nothing is assigned — the cookie stays a record
+     * of a random assignment only, so switching the split back on later
+     * resumes a clean experiment rather than one seeded by the pinned period.
+     *
      * @return array{0: string, 1: bool} [variant, wasJustAssigned]
      */
-    public function resolve(Request $request): array
+    public function resolve(Request $request, HomepageLayout $layout = HomepageLayout::AbTest): array
     {
+        $forced = $layout->forcedVariant();
+
+        if ($forced !== null) {
+            return [$forced, false];
+        }
+
         $existing = $request->cookie(self::COOKIE_NAME);
 
         if (in_array($existing, [self::VARIANT_GRID, self::VARIANT_FEED], true)) {

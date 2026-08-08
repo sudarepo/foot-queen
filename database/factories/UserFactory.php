@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Models\Site;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
@@ -30,7 +31,25 @@ class UserFactory extends Factory
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
             'remember_token' => Str::random(10),
+            /**
+             * The default user is the operator's own account — the only kind
+             * that existed before site assignments. Use `siteManager()` for
+             * the scoped kind.
+             */
+            'is_admin' => true,
         ];
+    }
+
+    /**
+     * Someone who can only manage the sites given to them.
+     *
+     * @param  Site|iterable<int, Site>  $sites
+     */
+    public function siteManager(Site|iterable $sites): static
+    {
+        return $this
+            ->state(['is_admin' => false])
+            ->hasAttached($sites instanceof Site ? [$sites] : $sites, relationship: 'sites');
     }
 
     /**

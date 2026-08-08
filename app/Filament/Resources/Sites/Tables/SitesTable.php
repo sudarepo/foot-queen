@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Sites\Tables;
 
 use App\Models\Cam;
 use App\Models\Site;
+use App\Services\DeviceDetector;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -45,6 +46,21 @@ class SitesTable
                     ->badge()
                     ->color(fn (int $state) => $state > 0 ? 'success' : 'danger')
                     ->state(fn (Site $record) => Cam::online()->forSite($record)->count()),
+
+                /**
+                 * Which sites are still splitting their traffic and which
+                 * have settled — the thing you'd otherwise have to open
+                 * every record to find out.
+                 */
+                TextColumn::make('home_layout')
+                    ->label('Homepage')
+                    ->badge()
+                    ->listWithLineBreaks()
+                    ->state(fn (Site $record) => [
+                        'Desktop: '.$record->homeLayout(DeviceDetector::DESKTOP)->label(),
+                        'Mobile: '.$record->homeLayout(DeviceDetector::MOBILE)->label(),
+                    ])
+                    ->color('gray'),
 
                 IconColumn::make('is_default')
                     ->label('Default')

@@ -255,20 +255,21 @@ class MultiSiteTest extends TestCase
         ]);
 
         $this->get('http://bbwcams.test/go/'.$cam->id.'?src=feed')
-            ->assertRedirectContains('track=bbw-feed');
+            ->assertRedirectContains('track=bbw-feed-d');
     }
 
     public function test_a_site_without_a_prefix_still_sends_the_bare_source_label(): void
     {
         // Foot Queen's existing affiliate history is keyed on 'grid'/'feed',
-        // so the unprefixed default has to stay byte-identical.
+        // so the unprefixed default stays that — the device suffix is the
+        // only thing added to it.
         $cam = Cam::factory()->create([
             'tags' => ['feet'],
             'categories' => ['feet'],
             'room_url' => 'https://chaturbate.com/in/?tour=dT8X&campaign=abc&track=default&room=anna',
         ]);
 
-        $this->get($this->defaultHost('/go/'.$cam->id.'?src=grid'))->assertRedirectContains('track=grid');
+        $this->get($this->defaultHost('/go/'.$cam->id.'?src=grid'))->assertRedirectContains('track=grid-d');
     }
 
     public function test_analytics_events_record_which_site_they_happened_on(): void
