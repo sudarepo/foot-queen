@@ -24,7 +24,12 @@ class ConversionStatsWidget extends StatsOverviewWidget
         $from = $this->pageFilters['from'] ?? null;
         $until = $this->pageFilters['until'] ?? null;
 
+        // Blank means "all sites pooled" — a summary across every domain,
+        // deliberately opt-in rather than the default (see the filters form).
+        $siteId = $this->pageFilters['site_id'] ?? null;
+
         $views = PageViewEvent::query()
+            ->when($siteId, fn ($query) => $query->where('site_id', $siteId))
             ->when($from, fn ($query) => $query->whereDate('created_at', '>=', $from))
             ->when($until, fn ($query) => $query->whereDate('created_at', '<=', $until))
             ->selectRaw('page, count(*) as aggregate')
@@ -32,6 +37,7 @@ class ConversionStatsWidget extends StatsOverviewWidget
             ->pluck('aggregate', 'page');
 
         $clicks = CamClickEvent::query()
+            ->when($siteId, fn ($query) => $query->where('site_id', $siteId))
             ->when($from, fn ($query) => $query->whereDate('created_at', '>=', $from))
             ->when($until, fn ($query) => $query->whereDate('created_at', '<=', $until))
             ->selectRaw('source_page, count(*) as aggregate')

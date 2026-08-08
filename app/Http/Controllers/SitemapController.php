@@ -3,19 +3,32 @@
 namespace App\Http\Controllers;
 
 use App\Models\Cam;
+use App\Models\Site;
 use App\Services\SeoPageResolver;
 use Illuminate\Http\Response;
 
 class SitemapController extends Controller
 {
     /**
-     * Well under the 50,000-URL / 50MB sitemap ceiling, and comfortably more
-     * than the ~400 performers a feet-tag sync typically has online — a
-     * bound against the roster growing, not a limit we expect to hit.
+     * Well under the 50,000-URL / 50MB sitemap ceiling. The list is every
+     * performer we've ever synced for this site, not just the ones online, so
+     * it only grows — the cap is what keeps a year of roster turnover from
+     * pushing the file past the ceiling.
      */
-    private const PROFILE_URL_LIMIT = 2000;
+    private const PROFILE_URL_LIMIT = 20000;
 
     public function __construct(private SeoPageResolver $seo) {}
+
+    /**
+     * The domain this request is being served on. Resolved per call rather
+     * than constructor-injected — Laravel caches the controller instance on
+     * the Route object, which outlives a single request under a persistent
+     * runtime, so an injected Site would be the first domain's forever.
+     */
+    private function site(): Site
+    {
+        return app(Site::class);
+    }
 
     public function sitemap(): Response
     {
@@ -38,7 +51,7 @@ class SitemapController extends Controller
 
         // Only include canonical URLs. Aliases (e.g. /blonde/ when /girls/blonde/
         // is canonical) are intentionally excluded so Google doesn't index duplicates.
-        foreach ($this->seo->canonical() as $page) {
+        foreach ($this->seo->canonical($this->site()->seoRegistry()) as $page) {
             $urls[] = [
                 'loc' => url('/'.$page['slug']),
                 'lastmod' => $today,
@@ -82,28 +95,39 @@ class SitemapController extends Controller
     /**
      * Performer profile pages (/cam/{username}).
      *
-     * Only currently-online performers are listed. An offline profile still
-     * resolves — the bio and photo sets are the durable half of the page —
-     * but submitting a URL whose main content is a stream that isn't running
-     * invites a "crawled, not indexed" verdict, and the roster turns over
-     * constantly. Ordered by viewers so the cap, when it bites, keeps the
-     * performers with the most substantial pages.
+     * Scoped to this site: the cams table is a shared pool across every domain
+     * the deploy serves, and a sitemap that advertises another site's
+     * performers is submitting URLs that 404 — /cam/{username} is served by
+     * whichever domain the crawler asked, and that domain won't have them.
+     *
+     * Every performer, online or not. An offline profile is a real page — the
+     * bio and photo sets are the durable half of it, and the performer is
+     * usually back within a day — so leaving them out just meant the bulk of
+     * our URL space was never advertised, and a crawler that only learns a
+     * URL while its performer happens to be live is a crawler that mostly
+     * never learns it.
+     *
+     * Online rows are ordered first, and rank ahead on `priority`, so both
+     * the cap and the crawl budget land on the pages that are live right now.
      *
      * @return array<int, array{loc: string, lastmod: string, changefreq: string, priority: string}>
      */
     private function profileUrls(): array
     {
-        return Cam::online()
+        return Cam::forSite($this->site())
+            ->orderByDesc('is_online')
             ->orderByDesc('viewers')
             ->limit(self::PROFILE_URL_LIMIT)
-            ->get(['username', 'updated_at'])
+            ->get(['username', 'is_online', 'updated_at'])
             ->map(fn (Cam $cam) => [
                 'loc' => route('cams.show', $cam->username),
                 'lastmod' => $cam->updated_at->toDateString(),
-                // Hourly, not daily: whether the performer is live is the
-                // part of the page that changes, and it changes constantly.
-                'changefreq' => 'hourly',
-                'priority' => '0.5',
+                // Hourly for a live room: whether the performer is streaming
+                // is the part of the page that changes, and it changes
+                // constantly. An offline page is just the bio until they're
+                // back, so daily is honest and doesn't burn crawl budget.
+                'changefreq' => $cam->is_online ? 'hourly' : 'daily',
+                'priority' => $cam->is_online ? '0.5' : '0.3',
             ])
             ->all();
     }

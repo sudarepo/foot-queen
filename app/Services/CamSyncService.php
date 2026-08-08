@@ -56,6 +56,7 @@ class CamSyncService
                     'hair_color' => $cam['hair_color'],
                     'body_type' => $cam['body_type'],
                     'categories' => json_encode($cam['categories'] ?? []),
+                    'tags' => json_encode($cam['tags'] ?? []),
                     'viewers' => $cam['viewers'],
                     'thumbnail_url' => $cam['thumbnail_url'],
                     'room_url' => $cam['room_url'],
@@ -77,7 +78,7 @@ class CamSyncService
                 ['provider', 'external_id'],            // unique key
                 [                                        // columns to update on conflict
                     'username', 'gender', 'age', 'hair_color', 'body_type',
-                    'categories', 'viewers', 'thumbnail_url', 'room_url', 'embed_url',
+                    'categories', 'tags', 'viewers', 'thumbnail_url', 'room_url', 'embed_url',
                     'room_subject', 'country', 'spoken_languages',
                     'is_hd', 'is_new', 'is_online', 'last_seen_at', 'updated_at',
                 ]

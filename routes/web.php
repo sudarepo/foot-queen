@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\CamController;
 use App\Http\Controllers\SitemapController;
+use App\Services\SeoPageResolver;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -39,14 +40,20 @@ Route::get('/robots.txt', [SitemapController::class, 'robots'])
 /*
  * Landing pages.
  *
- * Each slug in config/seo-pages.php gets its own explicit route. This is
- * deliberate — no catch-all — so typos, future admin routes, or arbitrary
- * paths get a proper 404 rather than hitting the landing handler.
+ * Each slug across every registry in config/seo-pages/ gets its own explicit
+ * route. This is deliberate — no catch-all — so typos, future admin routes, or
+ * arbitrary paths get a proper 404 rather than hitting the landing handler.
  *
- * When you add a new page to config/seo-pages.php, you get a new route here
- * automatically on the next request (or after `php artisan route:cache`).
+ * The route table is shared by all sites rather than built per domain: route
+ * names stay stable ('landing.girls' means the same thing everywhere, so views
+ * and redirects don't need to know which site they're on), and `route:cache`
+ * still works. Sites are separated inside the handler instead — a slug that
+ * isn't in the current site's registry 404s, same as one that doesn't exist.
+ *
+ * When you add a page to a registry, you get a new route here automatically on
+ * the next request (or after `php artisan route:cache`).
  */
-foreach (array_keys(config('seo-pages', [])) as $slug) {
+foreach (app(SeoPageResolver::class)->allSlugs() as $slug) {
     Route::get('/'.$slug, [CamController::class, 'landing'])
         ->defaults('slug', $slug)
         ->name('landing.'.str_replace('/', '.', $slug));

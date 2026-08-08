@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Cam;
 use App\Models\CamClickEvent;
 use App\Models\PageViewEvent;
+use App\Models\Site;
 use App\Models\User;
 use App\Services\HomepageAbTest;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -92,15 +93,16 @@ class FilamentAdminPanelTest extends TestCase
     public function test_the_conversion_dashboard_default_date_filter_excludes_pre_launch_data(): void
     {
         $user = User::factory()->create();
+        $site = Site::query()->where('is_default', true)->firstOrFail();
 
         // Before the A/B split shipped — should be excluded by the default
         // "from" filter (HomepageAbTest::LAUNCHED_AT).
-        PageViewEvent::create(['page' => 'grid', 'created_at' => '2026-01-01 00:00:00']);
+        PageViewEvent::create(['site_id' => $site->id, 'page' => 'grid', 'created_at' => '2026-01-01 00:00:00']);
 
         // Within the default range.
-        PageViewEvent::create(['page' => 'grid', 'created_at' => now()]);
+        PageViewEvent::create(['site_id' => $site->id, 'page' => 'grid', 'created_at' => now()]);
         $cam = Cam::factory()->create();
-        CamClickEvent::create(['cam_id' => $cam->id, 'source_page' => 'grid', 'created_at' => now()]);
+        CamClickEvent::create(['site_id' => $site->id, 'cam_id' => $cam->id, 'source_page' => 'grid', 'created_at' => now()]);
 
         $response = $this->actingAs($user)->get('/admin/conversion-dashboard');
 
@@ -108,5 +110,41 @@ class FilamentAdminPanelTest extends TestCase
         // 1 view in range (not 2 — the pre-launch one is excluded by default).
         $response->assertSee('1 clicks / 1 views', false);
         $response->assertSee(HomepageAbTest::LAUNCHED_AT, false);
+    }
+
+    /**
+     * With several domains logging into the same two tables, a pooled CTR
+     * averages unrelated audiences and describes neither, so the dashboard
+     * measures one site at a time and defaults to the default site.
+     */
+    public function test_the_conversion_dashboard_counts_only_the_selected_sites_traffic(): void
+    {
+        $user = User::factory()->create();
+        $site = Site::query()->where('is_default', true)->firstOrFail();
+        $other = Site::factory()->create();
+
+        $cam = Cam::factory()->create();
+
+        PageViewEvent::create(['site_id' => $site->id, 'page' => 'grid', 'created_at' => now()]);
+        CamClickEvent::create(['site_id' => $site->id, 'cam_id' => $cam->id, 'source_page' => 'grid', 'created_at' => now()]);
+
+        // Another domain's traffic, which must not land in these numbers.
+        foreach (range(1, 5) as $ignored) {
+            PageViewEvent::create(['site_id' => $other->id, 'page' => 'grid', 'created_at' => now()]);
+        }
+
+        $this->actingAs($user)
+            ->get('/admin/conversion-dashboard')
+            ->assertSee('1 clicks / 1 views', false);
+    }
+
+    public function test_an_authenticated_user_can_manage_sites(): void
+    {
+        $user = User::factory()->create();
+        $site = Site::query()->where('is_default', true)->firstOrFail();
+
+        $this->actingAs($user)->get('/admin/sites')->assertSuccessful();
+        $this->actingAs($user)->get('/admin/sites/create')->assertSuccessful();
+        $this->actingAs($user)->get("/admin/sites/{$site->id}/edit")->assertSuccessful();
     }
 }

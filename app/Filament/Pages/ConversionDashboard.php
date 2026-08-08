@@ -3,10 +3,12 @@
 namespace App\Filament\Pages;
 
 use App\Filament\Widgets\ConversionStatsWidget;
+use App\Models\Site;
 use App\Services\HomepageAbTest;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
 use Filament\Pages\Dashboard\Concerns\HasFiltersForm;
 use Filament\Pages\Page;
@@ -42,8 +44,22 @@ class ConversionDashboard extends Page
     public function filtersForm(Schema $schema): Schema
     {
         return $schema->components([
-            Grid::make(['default' => 1, 'md' => 2])
+            Grid::make(['default' => 1, 'md' => 3])
                 ->schema([
+                    /**
+                     * Every domain served by this deploy logs into the same
+                     * two tables. Pooling them would average two different
+                     * audiences on two different niches into a CTR that
+                     * describes neither, so the comparison is per-site by
+                     * default — "All sites" is available but is a summary,
+                     * not an experiment result.
+                     */
+                    Select::make('site_id')
+                        ->label('Site')
+                        ->options(fn () => Site::query()->orderBy('name')->pluck('name', 'id'))
+                        ->default(fn () => Site::query()->where('is_default', true)->value('id'))
+                        ->placeholder('All sites (pooled)')
+                        ->helperText('Which domain\'s traffic to measure.'),
                     DatePicker::make('from')
                         ->label('From')
                         ->native(false)
