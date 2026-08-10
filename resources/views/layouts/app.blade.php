@@ -23,6 +23,8 @@
     $siteTitle = ($pageTitle ?? 'Live Cams').' — '.$site->name;
     $siteDescription = $metaDesc ?? $site->homeMeta();
     $logoUrl = $site->logoUrl();
+    $faviconUrl = $site->faviconUrl();
+    $faviconType = $site->faviconMimeType();
 @endphp
 <!DOCTYPE html>
 <html lang="en">
@@ -43,14 +45,39 @@
 
     <meta name="robots" content="index,follow">
 
-    {{-- Favicon set (see README for which files to drop into /public/) --}}
-    <link rel="icon" href="{{ asset('favicon.ico') }}" sizes="any">
-    <link rel="icon" type="image/svg+xml" href="{{ asset('icon.svg') }}">
-    <link rel="icon" type="image/png" sizes="16x16" href="{{ asset('favicon-16x16.png') }}">
-    <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('favicon-32x32.png') }}">
-    <link rel="icon" type="image/png" sizes="48x48" href="{{ asset('favicon-48x48.png') }}">
-    <link rel="apple-touch-icon" sizes="180x180" href="{{ asset('apple-touch-icon.png') }}">
-    <link rel="manifest" href="{{ asset('site.webmanifest') }}">
+    @if ($faviconUrl)
+        {{--
+            This site's own icon, replacing the set below outright: a partial
+            override would leave the other domains' tabs showing whichever of
+            Foot Queen's files the browser happened to prefer.
+
+            Apple's touch icon is only pointed at the upload when it's a PNG —
+            iOS renders nothing else — so an .ico or .svg upload falls through
+            to no touch icon at all rather than to another site's artwork.
+
+            The web manifest goes with it, for the same reason: the one in
+            public/ names Foot Queen and lists its install icons, so a site
+            that has said it wants its own icon is better off without it than
+            installed under someone else's name.
+        --}}
+        @if ($faviconType)
+            <link rel="icon" href="{{ $faviconUrl }}" type="{{ $faviconType }}">
+        @else
+            <link rel="icon" href="{{ $faviconUrl }}">
+        @endif
+        @if ($faviconType === 'image/png')
+            <link rel="apple-touch-icon" href="{{ $faviconUrl }}">
+        @endif
+    @else
+        {{-- Default favicon set (see README for which files to drop into /public/) --}}
+        <link rel="icon" href="{{ asset('favicon.ico') }}" sizes="any">
+        <link rel="icon" type="image/svg+xml" href="{{ asset('icon.svg') }}">
+        <link rel="icon" type="image/png" sizes="16x16" href="{{ asset('favicon-16x16.png') }}">
+        <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('favicon-32x32.png') }}">
+        <link rel="icon" type="image/png" sizes="48x48" href="{{ asset('favicon-48x48.png') }}">
+        <link rel="apple-touch-icon" sizes="180x180" href="{{ asset('apple-touch-icon.png') }}">
+        <link rel="manifest" href="{{ asset('site.webmanifest') }}">
+    @endif
     <meta name="theme-color" content="{{ $site->theme_color ?? '#0b0b0d' }}">
 
     <script type="application/ld+json">

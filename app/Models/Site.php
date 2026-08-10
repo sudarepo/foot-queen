@@ -179,6 +179,35 @@ class Site extends Model
         return file_exists(public_path('img/logo.png')) ? asset('img/logo.png') : null;
     }
 
+    /**
+     * The uploaded tab icon, or null to let the layout emit the favicon set
+     * that sits in public/ — Foot Queen's, which is why every other domain
+     * wants its own here.
+     */
+    public function faviconUrl(): ?string
+    {
+        return filled($this->favicon_path) ? $this->uploadUrl($this->favicon_path) : null;
+    }
+
+    /**
+     * The `type` hint for that icon's <link>, letting a browser skip formats
+     * it can't render rather than downloading them to find out. Null for an
+     * extension we don't recognise — the attribute is then omitted and the
+     * browser sniffs, which is the pre-existing behaviour for anything odd.
+     */
+    public function faviconMimeType(): ?string
+    {
+        return match (Str::lower(pathinfo((string) $this->favicon_path, PATHINFO_EXTENSION))) {
+            'ico' => 'image/x-icon',
+            'png' => 'image/png',
+            'svg' => 'image/svg+xml',
+            'gif' => 'image/gif',
+            'jpg', 'jpeg' => 'image/jpeg',
+            'webp' => 'image/webp',
+            default => null,
+        };
+    }
+
     public function ogImageUrl(): string
     {
         return filled($this->og_image_path)

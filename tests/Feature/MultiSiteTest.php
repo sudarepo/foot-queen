@@ -241,6 +241,39 @@ class MultiSiteTest extends TestCase
         $this->get($this->defaultHost('/feed'))->assertDontSee('name="keywords"', false);
     }
 
+    public function test_an_uploaded_favicon_replaces_the_shared_icon_set(): void
+    {
+        $this->bbwSite()->update(['favicon_path' => 'sites/favicons/bbw.png']);
+
+        $response = $this->get('http://bbwcams.test/feed');
+
+        $response->assertSee('<link rel="icon" href="http://bbwcams.test/storage/sites/favicons/bbw.png" type="image/png">', false)
+            ->assertSee('<link rel="apple-touch-icon" href="http://bbwcams.test/storage/sites/favicons/bbw.png">', false);
+
+        // Not one of Foot Queen's files survives, or the tab would show
+        // whichever of the two the browser preferred.
+        $response->assertDontSee('favicon.ico', false)
+            ->assertDontSee('favicon-32x32.png', false)
+            ->assertDontSee('site.webmanifest', false);
+    }
+
+    public function test_a_favicon_that_ios_cannot_render_is_not_offered_as_a_touch_icon(): void
+    {
+        $this->bbwSite()->update(['favicon_path' => 'sites/favicons/bbw.ico']);
+
+        $this->get('http://bbwcams.test/feed')
+            ->assertSee('type="image/x-icon"', false)
+            ->assertDontSee('apple-touch-icon', false);
+    }
+
+    public function test_a_site_without_a_favicon_keeps_the_icon_set_in_public(): void
+    {
+        $this->get($this->defaultHost('/feed'))
+            ->assertSee('<link rel="icon" href="'.asset('favicon.ico').'" sizes="any">', false)
+            ->assertSee('apple-touch-icon', false)
+            ->assertSee('site.webmanifest', false);
+    }
+
     /* ----------  Attribution  ---------- */
 
     public function test_outbound_clicks_carry_the_sites_track_prefix(): void

@@ -128,6 +128,19 @@ class SiteForm
                     ->visibility('public')
                     ->helperText('Shown next to the site name in the header. Leave empty to fall back to public/img/logo.png, or to show the name as text only.'),
 
+                /**
+                 * .ico and .svg are listed explicitly because image() accepts
+                 * `image/*`, which some browsers don't report for either.
+                 */
+                FileUpload::make('favicon_path')
+                    ->label('Favicon')
+                    ->image()
+                    ->acceptedFileTypes(['image/png', 'image/svg+xml', 'image/x-icon', 'image/vnd.microsoft.icon'])
+                    ->disk('public')
+                    ->directory('sites/favicons')
+                    ->visibility('public')
+                    ->helperText('The browser tab icon for this domain. A 32×32 (or larger, square) PNG is the safe choice — .ico and .svg work too, but only a PNG doubles as the iOS home-screen icon. Leave empty to fall back to the icon set in public/, which is Foot Queen\'s.'),
+
                 FileUpload::make('og_image_path')
                     ->label('Social sharing image')
                     ->image()
@@ -218,15 +231,43 @@ class SiteForm
                     ->helperText('The heart of the site. These are the provider tags the sync searches for, and the hard boundary of what this domain shows — no filter in the UI can escape them. Leave empty to show everything matching the gender above.')
                     ->columnSpanFull(),
 
-                TextInput::make('default_category')
-                    ->helperText('Pre-selected in the category dropdown on the homepage and feed. Unlike the tags above, a visitor can clear it with "All categories" — which still cannot leave the tags.'),
-
                 TagsInput::make('featured_categories')
                     ->label('Category dropdown options')
                     ->placeholder('Leave empty for the shared default list')
                     ->helperText('Overrides config/cam-taxonomy.php featured_categories for this site only.')
+                    ->live()
+                    ->columnSpanFull(),
+
+                Select::make('default_category')
+                    ->options(self::categoryOptions(...))
+                    ->placeholder('All categories')
+                    ->helperText('Pre-selected in the category dropdown on the homepage and feed. Unlike the tags above, a visitor can clear it with "All categories" — which still cannot leave the tags.')
                     ->columnSpanFull(),
             ]);
+    }
+
+    /**
+     * What the category dropdown will actually offer this site's visitors —
+     * the list above while it's being edited, otherwise the shared taxonomy.
+     *
+     * A value saved before that list was narrowed is kept as an option, so a
+     * form opened on such a site shows what it is set to instead of appearing
+     * blank and clearing the setting on the next save.
+     *
+     * @return array<string, string>
+     */
+    private static function categoryOptions(Get $get): array
+    {
+        $categories = filled($get('featured_categories'))
+            ? $get('featured_categories')
+            : config('cam-taxonomy.featured_categories', []);
+
+        return collect($categories)
+            ->push($get('default_category'))
+            ->filter()
+            ->unique()
+            ->mapWithKeys(fn (string $category) => [$category => ucfirst($category)])
+            ->all();
     }
 
     private static function copyTab(): Tab
