@@ -123,7 +123,13 @@ class SiteForm
         return Tab::make('Branding')
             ->icon('heroicon-o-paint-brush')
             ->schema([
-                self::assetInUse('logo_path', 'img/logo.png', 'Logo in use now — the one that ships in public/img/logo.png. Upload below to replace it for this site.', 48),
+                self::assetInUse(
+                    field: 'logo_path',
+                    publicPath: 'img/logo.png',
+                    customNote: 'Logo in use now — uploaded for this site. Upload below to replace it.',
+                    fallbackNote: 'Logo in use now — the one that ships in public/img/logo.png. Upload below to replace it for this site.',
+                    previewHeight: 48,
+                ),
 
                 FileUpload::make('logo_path')
                     ->label('Logo')
@@ -133,7 +139,13 @@ class SiteForm
                     ->visibility('public')
                     ->helperText('Shown next to the site name in the header. Leave empty to fall back to public/img/logo.png, or to show the name as text only.'),
 
-                self::assetInUse('favicon_path', 'favicon-48x48.png', 'Favicon in use now — the icon set that ships in public/, which is Foot Queen\'s. Upload below to replace it for this site.', 32),
+                self::assetInUse(
+                    field: 'favicon_path',
+                    publicPath: 'favicon-48x48.png',
+                    customNote: 'Favicon in use now — uploaded for this site. Upload below to replace it.',
+                    fallbackNote: 'Favicon in use now — the icon set that ships in public/, which is Foot Queen\'s. Upload below to replace it for this site.',
+                    previewHeight: 32,
+                ),
 
                 /**
                  * .ico and .svg are listed explicitly because image() accepts
@@ -148,7 +160,13 @@ class SiteForm
                     ->visibility('public')
                     ->helperText('The browser tab icon for this domain. A 32×32 (or larger, square) PNG is the safe choice — .ico and .svg work too, but only a PNG doubles as the iOS home-screen icon. Leave empty to fall back to the icon set in public/, which is Foot Queen\'s.'),
 
-                self::assetInUse('og_image_path', 'og-image.png', 'Sharing image in use now — the one that ships in public/og-image.png. Upload below to replace it for this site.', 120),
+                self::assetInUse(
+                    field: 'og_image_path',
+                    publicPath: 'og-image.png',
+                    customNote: 'Sharing image in use now — uploaded for this site. Upload below to replace it.',
+                    fallbackNote: 'Sharing image in use now — the one that ships in public/og-image.png. Upload below to replace it for this site.',
+                    previewHeight: 120,
+                ),
 
                 FileUpload::make('og_image_path')
                     ->label('Social sharing image')
@@ -184,31 +202,30 @@ class SiteForm
     }
 
     /**
-     * The image the site is actually serving, above the field that replaces it.
-     *
-     * Only rendered while that field is empty, because a field with an upload
-     * in it already previews the upload. Empty is the case worth drawing:
-     * nothing on screen reads as "this site has no logo", when in fact it is
-     * serving the file that ships in public/ — Foot Queen's — which is
-     * precisely what a second site has to notice in order to fix it.
+     * The image the site is actually serving, above the field that replaces it:
+     * this site's own upload when it has one, otherwise the file that ships
+     * in public/ — Foot Queen's. Either way, nothing on screen should read as
+     * "this site has no logo" when it's serving something.
      *
      * `file_exists` because those public/ files are a convention the README
      * documents rather than something the repo guarantees; a missing one
      * should leave the field alone, not render a broken image above it.
      */
-    private static function assetInUse(string $field, string $publicPath, string $note, int $previewHeight): Group
+    private static function assetInUse(string $field, string $publicPath, string $customNote, string $fallbackNote, int $previewHeight): Group
     {
         return Group::make([
-            Text::make($note)
+            Text::make(fn (Get $get): string => filled($get($field)) ? $customNote : $fallbackNote)
                 ->size(TextSize::Small)
                 ->color('gray'),
 
             Image::make(
-                url: fn (): string => asset($publicPath),
-                alt: $note,
+                url: fn (Get $get): string => filled($get($field))
+                    ? asset('storage/'.ltrim((string) $get($field), '/'))
+                    : asset($publicPath),
+                alt: fn (Get $get): string => filled($get($field)) ? $customNote : $fallbackNote,
             )->imageHeight($previewHeight),
         ])
-            ->visible(fn (Get $get): bool => blank($get($field)) && file_exists(public_path($publicPath)));
+            ->visible(fn (Get $get): bool => filled($get($field)) || file_exists(public_path($publicPath)));
     }
 
     /**

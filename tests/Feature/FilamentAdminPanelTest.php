@@ -168,10 +168,11 @@ class FilamentAdminPanelTest extends TestCase
     }
 
     /**
-     * Once there's an upload the FileUpload previews it, so the fallback
-     * block steps aside rather than showing a second, wrong image.
+     * Once there's an upload, the "in use now" preview switches from the
+     * public/ fallback to this site's own file — it never disappears,
+     * because something is always being served and worth showing.
      */
-    public function test_the_branding_tab_drops_the_fallback_preview_once_an_asset_is_uploaded(): void
+    public function test_the_branding_tab_previews_the_sites_own_upload_once_one_exists(): void
     {
         Storage::fake('public');
         Storage::disk('public')->putFileAs('sites/logos', UploadedFile::fake()->image('custom.png'), 'custom.png');
@@ -185,7 +186,9 @@ class FilamentAdminPanelTest extends TestCase
 
         $this->actingAs($user)
             ->get("/admin/sites/{$site->id}/edit")
-            ->assertDontSee('Logo in use now')
-            ->assertDontSee('Favicon in use now');
+            ->assertSee('Logo in use now — uploaded for this site.')
+            ->assertSee('Favicon in use now — uploaded for this site.')
+            ->assertSee('storage/sites/logos/custom.png', false)
+            ->assertSee('storage/sites/favicons/custom.png', false);
     }
 }
