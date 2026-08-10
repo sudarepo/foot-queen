@@ -12,12 +12,15 @@ use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Group;
+use Filament\Schemas\Components\Image;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\Text;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
+use Filament\Support\Enums\TextSize;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 
@@ -120,6 +123,8 @@ class SiteForm
         return Tab::make('Branding')
             ->icon('heroicon-o-paint-brush')
             ->schema([
+                self::assetInUse('logo_path', 'img/logo.png', 'Logo in use now — the one that ships in public/img/logo.png. Upload below to replace it for this site.', 48),
+
                 FileUpload::make('logo_path')
                     ->label('Logo')
                     ->image()
@@ -127,6 +132,8 @@ class SiteForm
                     ->directory('sites/logos')
                     ->visibility('public')
                     ->helperText('Shown next to the site name in the header. Leave empty to fall back to public/img/logo.png, or to show the name as text only.'),
+
+                self::assetInUse('favicon_path', 'favicon-48x48.png', 'Favicon in use now — the icon set that ships in public/, which is Foot Queen\'s. Upload below to replace it for this site.', 32),
 
                 /**
                  * .ico and .svg are listed explicitly because image() accepts
@@ -140,6 +147,8 @@ class SiteForm
                     ->directory('sites/favicons')
                     ->visibility('public')
                     ->helperText('The browser tab icon for this domain. A 32×32 (or larger, square) PNG is the safe choice — .ico and .svg work too, but only a PNG doubles as the iOS home-screen icon. Leave empty to fall back to the icon set in public/, which is Foot Queen\'s.'),
+
+                self::assetInUse('og_image_path', 'og-image.png', 'Sharing image in use now — the one that ships in public/og-image.png. Upload below to replace it for this site.', 120),
 
                 FileUpload::make('og_image_path')
                     ->label('Social sharing image')
@@ -172,6 +181,34 @@ class SiteForm
                     ->reorderable()
                     ->columnSpanFull(),
             ]);
+    }
+
+    /**
+     * The image the site is actually serving, above the field that replaces it.
+     *
+     * Only rendered while that field is empty, because a field with an upload
+     * in it already previews the upload. Empty is the case worth drawing:
+     * nothing on screen reads as "this site has no logo", when in fact it is
+     * serving the file that ships in public/ — Foot Queen's — which is
+     * precisely what a second site has to notice in order to fix it.
+     *
+     * `file_exists` because those public/ files are a convention the README
+     * documents rather than something the repo guarantees; a missing one
+     * should leave the field alone, not render a broken image above it.
+     */
+    private static function assetInUse(string $field, string $publicPath, string $note, int $previewHeight): Group
+    {
+        return Group::make([
+            Text::make($note)
+                ->size(TextSize::Small)
+                ->color('gray'),
+
+            Image::make(
+                url: fn (): string => asset($publicPath),
+                alt: $note,
+            )->imageHeight($previewHeight),
+        ])
+            ->visible(fn (Get $get): bool => blank($get($field)) && file_exists(public_path($publicPath)));
     }
 
     /**

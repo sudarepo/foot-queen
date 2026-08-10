@@ -9,6 +9,8 @@ use App\Models\Site;
 use App\Models\User;
 use App\Services\HomepageAbTest;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class FilamentAdminPanelTest extends TestCase
@@ -146,5 +148,44 @@ class FilamentAdminPanelTest extends TestCase
         $this->actingAs($user)->get('/admin/sites')->assertSuccessful();
         $this->actingAs($user)->get('/admin/sites/create')->assertSuccessful();
         $this->actingAs($user)->get("/admin/sites/{$site->id}/edit")->assertSuccessful();
+    }
+
+    /**
+     * A site with nothing uploaded is still serving the files in public/, so
+     * the branding tab has to show them — otherwise it reads as "no logo".
+     */
+    public function test_the_branding_tab_previews_the_public_fallbacks_when_nothing_is_uploaded(): void
+    {
+        $user = User::factory()->create();
+        $site = Site::factory()->create(['logo_path' => null, 'favicon_path' => null]);
+
+        $this->actingAs($user)
+            ->get("/admin/sites/{$site->id}/edit")
+            ->assertSee('Logo in use now')
+            ->assertSee('Favicon in use now')
+            ->assertSee('img/logo.png', false)
+            ->assertSee('favicon-48x48.png', false);
+    }
+
+    /**
+     * Once there's an upload the FileUpload previews it, so the fallback
+     * block steps aside rather than showing a second, wrong image.
+     */
+    public function test_the_branding_tab_drops_the_fallback_preview_once_an_asset_is_uploaded(): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->putFileAs('sites/logos', UploadedFile::fake()->image('custom.png'), 'custom.png');
+        Storage::disk('public')->putFileAs('sites/favicons', UploadedFile::fake()->image('custom.png'), 'custom.png');
+
+        $user = User::factory()->create();
+        $site = Site::factory()->create([
+            'logo_path' => 'sites/logos/custom.png',
+            'favicon_path' => 'sites/favicons/custom.png',
+        ]);
+
+        $this->actingAs($user)
+            ->get("/admin/sites/{$site->id}/edit")
+            ->assertDontSee('Logo in use now')
+            ->assertDontSee('Favicon in use now');
     }
 }
