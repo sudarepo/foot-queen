@@ -27,7 +27,7 @@
              has already decided still gets there in one click. --}}
         <a href="{{ route('cams.show', ['cam' => $cam->username, 'from' => 'feed']) }}"
            class="ig-post__media"
-           @if ($cam->embed_url) data-embed-url="{{ $cam->embed_url }}" @endif>
+           @if ($cam->embed_url) data-preview-video-url="https://thumb.live.mmcdn.com/roomad/{{ $cam->username }}.mp4" @endif>
             @if ($cam->thumbnail_url)
                 <img src="{{ $cam->thumbnail_url }}" alt="{{ $cam->username }}" loading="lazy">
             @else

@@ -6,10 +6,8 @@
     {{-- Warm the connection ahead of the first preview — skips DNS/TCP/TLS
          setup (can be several hundred ms) on the request that actually
          matters instead of paying it cold on first hover/scroll-into-view. --}}
-    <link rel="preconnect" href="https://cbxyz.com">
-    <link rel="dns-prefetch" href="https://cbxyz.com">
-    <link rel="preconnect" href="https://chaturbate.com">
-    <link rel="dns-prefetch" href="https://chaturbate.com">
+    <link rel="preconnect" href="https://thumb.live.mmcdn.com">
+    <link rel="dns-prefetch" href="https://thumb.live.mmcdn.com">
 @endpush
 
 @section('content')
@@ -72,17 +70,19 @@
             // which the "pre-buffer the next card" logic below relies on.
             var cards = [];
 
-            var active = null;     // { el, iframe, overlay } — visible & playing, at most one
-            var preloading = null; // { el, iframe } — hidden, warming up in the background, at most one
+            var active = null;     // { el, video } — visible & playing, at most one
+            var preloading = null; // { el, video } — hidden, warming up in the background, at most one
 
-            function createIframe(el) {
-                var iframe = document.createElement('iframe');
-                iframe.src = el.dataset.embedUrl;
-                iframe.className = 'ig-post__live-embed';
-                iframe.setAttribute('frameborder', '0');
-                iframe.setAttribute('allow', 'autoplay');
-                iframe.setAttribute('referrerpolicy', 'no-referrer');
-                return iframe;
+            function createVideo(el) {
+                var video = document.createElement('video');
+                video.src = el.dataset.previewVideoUrl;
+                video.className = 'ig-post__live-embed';
+                video.muted = true;
+                video.autoplay = true;
+                video.loop = true;
+                video.playsInline = true;
+                video.preload = 'auto';
+                return video;
             }
 
             // Starts the network request early, before the card is actually shown —
@@ -92,15 +92,15 @@
             function startPreload(el) {
                 if ((preloading && preloading.el === el) || (active && active.el === el)) return;
                 cancelPreload();
-                var iframe = createIframe(el);
-                iframe.classList.add('ig-post__live-embed--preloading');
-                el.appendChild(iframe);
-                preloading = { el: el, iframe: iframe };
+                var video = createVideo(el);
+                video.classList.add('ig-post__live-embed--preloading');
+                el.appendChild(video);
+                preloading = { el: el, video: video };
             }
 
             function cancelPreload() {
                 if (!preloading) return;
-                preloading.iframe.remove();
+                preloading.video.remove();
                 preloading = null;
             }
 
@@ -110,39 +110,28 @@
                 if (active && active.el === el) return;
                 unmountActive();
 
-                var iframe;
+                var video;
                 if (preloading && preloading.el === el) {
-                    iframe = preloading.iframe;
-                    iframe.classList.remove('ig-post__live-embed--preloading');
+                    video = preloading.video;
+                    video.classList.remove('ig-post__live-embed--preloading');
                     preloading = null;
                 } else {
                     cancelPreload();
-                    iframe = createIframe(el);
-                    el.appendChild(iframe);
+                    video = createVideo(el);
+                    el.appendChild(video);
                 }
-
-                // A cross-origin iframe swallows wheel/touch-scroll input once the
-                // cursor is over it — the parent page has no visibility into that
-                // separate document, so it can't forward the scroll. A transparent
-                // overlay in OUR document sits on top instead: normal DOM element,
-                // so scroll/click bubble up normally (scrolls the page, clicks
-                // still activate the card's link) as if the iframe weren't there.
-                var overlay = document.createElement('div');
-                overlay.className = 'ig-post__live-embed-overlay';
-                el.appendChild(overlay);
 
                 el.classList.add('ig-post__media--live');
 
                 var post = el.closest('.ig-post');
                 if (post) post.classList.add('ig-post--active');
 
-                active = { el: el, iframe: iframe, overlay: overlay };
+                active = { el: el, video: video };
             }
 
             function unmountActive() {
                 if (!active) return;
-                active.iframe.remove();
-                active.overlay.remove();
+                active.video.remove();
                 active.el.classList.remove('ig-post__media--live');
                 var post = active.el.closest('.ig-post');
                 if (post) post.classList.remove('ig-post--active');
@@ -210,7 +199,7 @@
             // a card behaves identically whenever it entered the DOM. Already
             // known cards are skipped, so re-scanning the container is cheap.
             function registerCards(root) {
-                var found = root.querySelectorAll('.ig-post__media[data-embed-url]');
+                var found = root.querySelectorAll('.ig-post__media[data-preview-video-url]');
 
                 Array.prototype.forEach.call(found, function (el) {
                     if (cards.indexOf(el) !== -1) return;

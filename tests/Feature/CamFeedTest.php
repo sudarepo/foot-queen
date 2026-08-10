@@ -183,7 +183,8 @@ class CamFeedTest extends TestCase
 
         $response = $this->get('/feed');
 
-        $response->assertSee('data-embed-url="https://chaturbate.com/in/?tour=abc&amp;campaign=Vg4Qi&amp;track=embed&amp;room=has-preview&amp;disable_sound=1"', false);
+        $response->assertSee('data-preview-video-url="https://thumb.live.mmcdn.com/roomad/has-preview.mp4"', false);
+        $response->assertDontSee('data-preview-video-url="https://thumb.live.mmcdn.com/roomad/no-preview.mp4"', false);
         $this->assertSame(1, substr_count($response->getContent(), 'Live preview'));
     }
 }
