@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Filament\Resources\Sites\Pages\EditSite;
 use App\Models\Cam;
 use App\Models\CamClickEvent;
 use App\Models\PageViewEvent;
@@ -11,6 +12,7 @@ use App\Services\HomepageAbTest;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 class FilamentAdminPanelTest extends TestCase
@@ -190,5 +192,50 @@ class FilamentAdminPanelTest extends TestCase
             ->assertSee('Favicon in use now — uploaded for this site.')
             ->assertSee('storage/sites/logos/custom.png', false)
             ->assertSee('storage/sites/favicons/custom.png', false);
+    }
+
+    /**
+     * A file picked but not yet saved is the upload field's business, not the
+     * "in use now" preview's — reading it there used to stringify the pending
+     * TemporaryUploadedFile into the preview's src, pointing the browser at
+     * /storage plus a PHP tmp path that the public disk never serves.
+     */
+    public function test_a_pending_upload_does_not_leak_a_temporary_path_into_the_in_use_preview(): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->putFileAs('sites/logos', UploadedFile::fake()->image('custom.png'), 'custom.png');
+
+        $user = User::factory()->create();
+        $site = Site::factory()->create(['logo_path' => 'sites/logos/custom.png']);
+
+        Livewire::actingAs($user)
+            ->test(EditSite::class, ['record' => $site->getRouteKey()])
+            ->fillForm(['logo_path' => [UploadedFile::fake()->image('replacement.png')]])
+            ->assertDontSee('storage/private', false)
+            ->assertDontSee('/tmp/php', false)
+            ->assertSee('storage/sites/logos/custom.png', false);
+    }
+
+    /**
+     * The whole round trip the branding tab exists for, since the preview bug
+     * above was only visible once a real upload was in flight.
+     */
+    public function test_a_logo_can_be_uploaded_through_the_branding_tab(): void
+    {
+        Storage::fake('public');
+
+        $user = User::factory()->create();
+        $site = Site::factory()->create(['logo_path' => null]);
+
+        Livewire::actingAs($user)
+            ->test(EditSite::class, ['record' => $site->getRouteKey()])
+            ->fillForm(['logo_path' => [UploadedFile::fake()->image('logo.png', 200, 64)]])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $site->refresh();
+
+        $this->assertNotNull($site->logo_path);
+        Storage::disk('public')->assertExists($site->logo_path);
     }
 }

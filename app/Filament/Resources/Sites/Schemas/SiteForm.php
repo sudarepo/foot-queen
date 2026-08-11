@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Sites\Schemas;
 
+use App\Models\Site;
 use App\Services\HomepageLayout;
 use Filament\Forms\Components\ColorPicker;
 use Filament\Forms\Components\FileUpload;
@@ -210,22 +211,33 @@ class SiteForm
      * `file_exists` because those public/ files are a convention the README
      * documents rather than something the repo guarantees; a missing one
      * should leave the field alone, not render a broken image above it.
+     *
+     * Read from the saved record rather than the form state: "in use now" is
+     * about what the domain is serving, which a file picked but not yet saved
+     * isn't — and while one is pending, the state holds a TemporaryUploadedFile
+     * whose string form is a PHP tmp path, not a path on the public disk.
      */
     private static function assetInUse(string $field, string $publicPath, string $customNote, string $fallbackNote, int $previewHeight): Group
     {
+        $savedPath = function (?Site $record) use ($field): ?string {
+            $path = $record?->getAttribute($field);
+
+            return filled($path) ? ltrim((string) $path, '/') : null;
+        };
+
         return Group::make([
-            Text::make(fn (Get $get): string => filled($get($field)) ? $customNote : $fallbackNote)
+            Text::make(fn (?Site $record): string => $savedPath($record) ? $customNote : $fallbackNote)
                 ->size(TextSize::Small)
                 ->color('gray'),
 
             Image::make(
-                url: fn (Get $get): string => filled($get($field))
-                    ? asset('storage/'.ltrim((string) $get($field), '/'))
+                url: fn (?Site $record): string => ($path = $savedPath($record))
+                    ? asset('storage/'.$path)
                     : asset($publicPath),
-                alt: fn (Get $get): string => filled($get($field)) ? $customNote : $fallbackNote,
+                alt: fn (?Site $record): string => $savedPath($record) ? $customNote : $fallbackNote,
             )->imageHeight($previewHeight),
         ])
-            ->visible(fn (Get $get): bool => filled($get($field)) || file_exists(public_path($publicPath)));
+            ->visible(fn (?Site $record): bool => $savedPath($record) !== null || file_exists(public_path($publicPath)));
     }
 
     /**
