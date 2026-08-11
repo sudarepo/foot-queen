@@ -137,7 +137,7 @@ class SiteForm
                     ->disk('public')
                     ->directory('sites/logos')
                     ->visibility('public')
-                    ->helperText('Shown next to the site name in the header. Leave empty to fall back to public/img/logo.png, or to show the name as text only.'),
+                    ->helperText('Shown next to the site name in the header, rendered at 32px tall with the width scaling to match — a transparent PNG around 200×64 is the safe choice. Leave empty to fall back to public/img/logo.png, or to show the name as text only.'),
 
                 self::assetInUse(
                     field: 'favicon_path',

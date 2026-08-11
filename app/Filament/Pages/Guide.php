@@ -182,7 +182,8 @@ class Guide extends Page
             ->schema([
                 $this->screenshot('site-branding', 'The Branding tab, with logo and social image uploads, accent and theme colour pickers, and the header navigation repeater'),
                 $this->fields([
-                    'Logo' => 'Shown beside the site name in the header. With none, the site falls back to the shared logo file, and failing that shows its name as text.',
+                    'Logo' => 'Shown beside the site name in the header, rendered at 32px tall with the width scaling to match — a transparent PNG around 200×64 is the safe choice. With none, the site falls back to the shared logo file, and failing that shows its name as text.',
+                    'Favicon' => 'The browser tab icon — a 32×32 (or larger, square) PNG is the safe choice; .ico and .svg work too, but only a PNG doubles as the iOS home-screen icon. With none, the site falls back to the shared favicon set.',
                     'Social sharing image' => 'Used when a link to the site is shared — 1200×630 is the size that survives every platform. Falls back to the shared default image.',
                     'Accent colour' => 'Drives buttons, links and live badges across the site. Leave it empty to keep the stylesheet default.',
                     'Theme colour' => 'Tints the browser chrome on mobile. It does not affect the page itself.',
