@@ -38,10 +38,22 @@ return [
             'report' => false,
         ],
 
+        /*
+         * A root-relative URL rather than the usual APP_URL prefix, because
+         * this install serves several domains from one codebase: an absolute
+         * URL would send every domain's uploads to the primary one. Same
+         * reasoning as Site::uploadUrl(), which uses asset() for the pages —
+         * but Filament's FileUpload calls Storage::url() itself, and a
+         * cross-origin URL there hangs its preview forever (the browser
+         * blocks the fetch, and Filament's loader has no error path).
+         *
+         * Relative is safe here only because the public disk is the local
+         * storage:link setup; a remote disk would need a real absolute URL.
+         */
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),
-            'url' => rtrim(env('APP_URL', 'http://localhost'), '/').'/storage',
+            'url' => '/storage',
             'visibility' => 'public',
             'throw' => false,
             'report' => false,

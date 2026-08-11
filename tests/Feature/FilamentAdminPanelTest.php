@@ -217,6 +217,22 @@ class FilamentAdminPanelTest extends TestCase
     }
 
     /**
+     * Filament's FileUpload builds its preview URL with Storage::url(), which
+     * this app can't route through Site::uploadUrl(). Pinning the disk to a
+     * relative URL is what keeps that preview same-origin on every domain —
+     * an absolute one pointing at the primary domain makes the browser block
+     * FilePond's fetch, which then sits on "Loading" forever because Filament's
+     * loader has no error path.
+     */
+    public function test_the_upload_field_previews_uploads_from_the_domain_being_viewed(): void
+    {
+        $url = Storage::disk('public')->url('sites/logos/custom.png');
+
+        $this->assertSame('/storage/sites/logos/custom.png', $url);
+        $this->assertStringStartsNotWith('http', $url);
+    }
+
+    /**
      * The whole round trip the branding tab exists for, since the preview bug
      * above was only visible once a real upload was in flight.
      */
