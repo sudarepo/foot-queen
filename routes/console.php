@@ -18,3 +18,11 @@ Schedule::command('cams:sync')->everyFiveMinutes();
  * (Laravel's default), but a slow one still can't stack up.
  */
 Schedule::command('cams:sync-profiles')->everyFifteenMinutes()->withoutOverlapping(10);
+
+/*
+ * Chaturbate's affiliate stats are daily-granularity and Chaturbate updates
+ * them a handful of times a day at most — hourly is frequent enough to feel
+ * near-live on the admin dashboard without hammering an endpoint that has
+ * nothing new to say between updates.
+ */
+Schedule::command('chaturbate:sync-stats')->hourly()->withoutOverlapping(10);
