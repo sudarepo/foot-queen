@@ -3,8 +3,11 @@
 namespace Tests\Feature;
 
 use App\Filament\Resources\Sites\Pages\EditSite;
+use App\Filament\Widgets\ChaturbateStatsWidget;
+use App\Filament\Widgets\TrafficStatsWidget;
 use App\Models\Cam;
 use App\Models\CamClickEvent;
+use App\Models\ChaturbateStatsDay;
 use App\Models\PageViewEvent;
 use App\Models\Site;
 use App\Models\User;
@@ -253,5 +256,102 @@ class FilamentAdminPanelTest extends TestCase
 
         $this->assertNotNull($site->logo_path);
         Storage::disk('public')->assertExists($site->logo_path);
+    }
+
+    public function test_an_authenticated_user_can_view_the_stats_dashboard(): void
+    {
+        $user = User::factory()->create();
+
+        $this->actingAs($user)->get('/admin/stats-dashboard')->assertSuccessful();
+    }
+
+    /**
+     * Mirrors the equivalent conversion-dashboard test — traffic on the
+     * Stats page is site-scoped for the same reason: pooling every domain's
+     * numbers together describes none of them. Tested directly against the
+     * widget (rather than scraping the full page) since the exact markup
+     * around a Stat's value isn't part of this app's contract.
+     */
+    public function test_the_stats_dashboard_counts_only_the_selected_sites_traffic(): void
+    {
+        $user = User::factory()->create();
+        $site = Site::query()->where('is_default', true)->firstOrFail();
+        $other = Site::factory()->create();
+
+        PageViewEvent::create(['site_id' => $site->id, 'page' => 'grid', 'created_at' => now()]);
+
+        foreach (range(1, 5) as $ignored) {
+            PageViewEvent::create(['site_id' => $other->id, 'page' => 'grid', 'created_at' => now()]);
+        }
+
+        Livewire::actingAs($user)
+            ->test(TrafficStatsWidget::class, ['pageFilters' => ['site_id' => $site->id]])
+            ->assertSeeHtml('1 page loads in range')
+            ->assertDontSeeHtml('6 page loads in range');
+    }
+
+    /**
+     * The whole reason this section exists disconnected from the Site
+     * filter: Chaturbate's affiliate API can't be broken down per site, so
+     * picking a site above must not make the revenue card look scoped when
+     * it isn't.
+     */
+    public function test_the_stats_dashboard_chaturbate_section_ignores_the_site_filter(): void
+    {
+        $user = User::factory()->create();
+        $site = Site::factory()->create();
+
+        ChaturbateStatsDay::create([
+            'date' => '2026-08-01',
+            'program' => 'Revshare',
+            'payout' => 100,
+            'is_ledger' => false,
+            'data' => ['Date' => '2026-08-01', 'Payout' => 100],
+        ]);
+
+        Livewire::actingAs($user)
+            ->test(ChaturbateStatsWidget::class, ['pageFilters' => ['site_id' => $site->id]])
+            ->assertSeeHtml('$100.00');
+    }
+
+    /**
+     * The regression test for the bug this design avoids: a withdrawal
+     * (negative payout, "Daily Payout Request") must not silently subtract
+     * itself from the revenue total.
+     */
+    public function test_the_stats_dashboard_excludes_ledger_rows_from_the_revenue_total(): void
+    {
+        $user = User::factory()->create();
+
+        ChaturbateStatsDay::create([
+            'date' => '2026-08-01',
+            'program' => 'Revshare',
+            'payout' => 100,
+            'is_ledger' => false,
+            'data' => ['Date' => '2026-08-01', 'Payout' => 100],
+        ]);
+
+        ChaturbateStatsDay::create([
+            'date' => '2026-08-07',
+            'program' => 'Daily Payout Request',
+            'payout' => -859.94,
+            'is_ledger' => true,
+            'data' => ['Date' => '2026-08-07', 'Payout' => -859.94],
+        ]);
+
+        Livewire::actingAs($user)
+            ->test(ChaturbateStatsWidget::class)
+            ->assertSeeHtml('$100.00')
+            ->assertDontSeeHtml('-759.94');
+    }
+
+    public function test_the_stats_dashboard_explains_the_chaturbate_account_wide_caveat(): void
+    {
+        $user = User::factory()->create();
+
+        $this->actingAs($user)
+            ->get('/admin/stats-dashboard')
+            ->assertSee('account-wide across every domain', false)
+            ->assertSee('settlement rows', false);
     }
 }
