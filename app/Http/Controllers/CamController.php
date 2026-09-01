@@ -484,13 +484,9 @@ class CamController extends Controller
                 'curvy' => 'Curvy',
                 'bbw' => 'BBW',
             ],
-            'category' => array_merge(
-                ['' => 'All categories'],
-                array_combine(
-                    $this->site()->featuredCategories(),
-                    array_map('ucfirst', $this->site()->featuredCategories())
-                )
-            ),
+            'category' => ['' => 'All categories'] + collect($this->site()->featuredCategories())
+                ->mapWithKeys(fn (string $category) => [$category => Site::categoryLabel($category)])
+                ->all(),
         ];
     }
 }

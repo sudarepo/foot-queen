@@ -287,6 +287,18 @@ class Site extends Model
             : config('cam-taxonomy.featured_categories', []);
     }
 
+    /**
+     * How one category slug is written for visitors.
+     *
+     * Slugs are raw provider tags, so most of them read fine with a capital
+     * ('squirt', 'latina'). The compounds and acronyms don't — hence the
+     * override map in the taxonomy config.
+     */
+    public static function categoryLabel(string $category): string
+    {
+        return config("cam-taxonomy.category_labels.{$category}") ?? ucfirst($category);
+    }
+
     /* ----------  Homepage layout  ---------- */
 
     /**

@@ -332,7 +332,7 @@ class SiteForm
             ->push($get('default_category'))
             ->filter()
             ->unique()
-            ->mapWithKeys(fn (string $category) => [$category => ucfirst($category)])
+            ->mapWithKeys(fn (string $category) => [$category => Site::categoryLabel($category)])
             ->all();
     }
 
