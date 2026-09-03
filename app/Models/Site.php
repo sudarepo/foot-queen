@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Services\DeviceDetector;
 use App\Services\HomepageLayout;
+use App\Services\LegalPage;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -45,6 +46,7 @@ class Site extends Model
         'nav_links' => 'array',
         'tags' => 'array',
         'featured_categories' => 'array',
+        'legal_pages' => 'array',
         'is_default' => 'boolean',
         'is_active' => 'boolean',
         'home_layout_desktop' => HomepageLayout::class,
@@ -297,6 +299,69 @@ class Site extends Model
     public static function categoryLabel(string $category): string
     {
         return config("cam-taxonomy.category_labels.{$category}") ?? ucfirst($category);
+    }
+
+    /* ----------  Legal pages  ---------- */
+
+    /**
+     * The hostname the legal text speaks about — "by using footqueen.com you
+     * agree…".
+     *
+     * The first configured domain rather than the request's host: a site
+     * answering on both the apex and www would otherwise word its own terms
+     * differently depending on which link the visitor followed. Falls back to
+     * the current host so a site with no domains yet (the default site, a
+     * fresh record) still reads correctly instead of saying "this website"
+     * twice in a sentence.
+     */
+    public function primaryDomain(): string
+    {
+        $domain = collect($this->domains ?? [])
+            ->first(fn (mixed $domain): bool => is_string($domain) && filled($domain));
+
+        return $domain ?? request()->getHost();
+    }
+
+    /**
+     * Where notices and requests go. Derived from the primary domain when
+     * unset — a DMCA policy with no address to send a notice to is not a
+     * policy, so "none" is not an option here the way it is for the copy
+     * fields above.
+     */
+    public function legalContactEmail(): string
+    {
+        return $this->legal_contact_email ?: 'abuse@'.$this->primaryDomain();
+    }
+
+    /**
+     * This site's override for one field of one legal page, or null to use
+     * the shared default text.
+     *
+     * "Empty" has to mean empty *of text*, not empty of characters: a rich
+     * text editor that has been opened and left alone hands back markup like
+     * `<p></p>`, and treating that as an override would serve a legally
+     * required page with nothing on it. The form strips those on save
+     * (SiteForm::legalPageSection); this is the same rule applied on the way
+     * out, for rows written before it did.
+     */
+    public function legalOverride(LegalPage $page, string $field): ?string
+    {
+        $value = $this->legal_pages[$page->value][$field] ?? null;
+
+        return static::isBlankRichText($value) ? null : (string) $value;
+    }
+
+    /**
+     * Whether a value carries no readable text — nothing at all, or markup
+     * with nothing inside it.
+     */
+    public static function isBlankRichText(mixed $value): bool
+    {
+        if (! is_string($value)) {
+            return true;
+        }
+
+        return blank(trim(html_entity_decode(strip_tags($value)), " \t\n\r\0\x0B\xC2\xA0"));
     }
 
     /* ----------  Homepage layout  ---------- */

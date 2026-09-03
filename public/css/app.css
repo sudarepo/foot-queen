@@ -1950,3 +1950,121 @@ body.is-profile-page .site-main {
 
     .pf__grid { grid-template-columns: repeat(5, 1fr); }
 }
+
+/* ---------- Legal pages ---------- */
+
+/* Long-form prose, so the column is capped well inside .site-main's 1600px —
+   a terms page set across a wide desktop viewport is unreadable. The body's
+   element styles are scoped under .legal__body because the text is authored
+   as plain HTML (shared defaults, or an admin's rich-text override): it has no
+   classes of its own to hook, and nothing else on the site uses bare h2/p/ul. */
+.legal {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 8px 0 48px;
+}
+
+.legal__title {
+    font-family: var(--font-display);
+    font-weight: 900;
+    font-size: clamp(26px, 4vw, 40px);
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    padding-bottom: 20px;
+    margin-bottom: 28px;
+    border-bottom: 1px solid var(--border);
+}
+
+.legal__body {
+    color: var(--text-dim);
+    font-size: 15px;
+    line-height: 1.75;
+}
+
+.legal__body h2 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 20px;
+    line-height: 1.3;
+    color: var(--text);
+    margin: 36px 0 12px;
+}
+
+.legal__body h3 {
+    font-size: 16px;
+    color: var(--text);
+    margin: 24px 0 8px;
+}
+
+.legal__body p,
+.legal__body ul,
+.legal__body ol {
+    margin-bottom: 16px;
+}
+
+.legal__body ul,
+.legal__body ol {
+    padding-left: 22px;
+}
+
+.legal__body ul { list-style: disc outside; }
+.legal__body ol { list-style: decimal outside; }
+.legal__body li { margin-bottom: 8px; }
+
+.legal__body strong { color: var(--text); font-weight: 600; }
+
+.legal__body a {
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.legal__body a:hover { color: var(--text); }
+
+.legal__body blockquote {
+    margin: 0 0 16px;
+    padding-left: 16px;
+    border-left: 2px solid var(--border);
+}
+
+/* The other three pages, so a visitor who lands on one of them from a search
+   result can reach the rest without going back to the footer. */
+.legal__nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    margin-top: 48px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.legal__nav a { text-decoration: underline; }
+.legal__nav a:hover { color: var(--text); }
+
+/* ---------- Footer legal links ---------- */
+
+.site-footer__legal {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px 20px;
+    margin-bottom: 14px;
+}
+
+/* Brighter than the compliance blurb underneath: these are links people are
+   expected to actually follow, and on some pages they are the only ones in
+   the footer. */
+.site-footer__legal a {
+    color: var(--text-dim);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    padding-bottom: 2px;
+}
+
+.site-footer__legal a:hover {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+}

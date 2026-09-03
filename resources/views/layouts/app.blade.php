@@ -143,6 +143,18 @@
     </main>
 
     <footer class="site-footer">
+        {{--
+            The four legal pages, on every page of every site. They are a
+            fixed set rather than a per-site setting (see App\Services\LegalPage)
+            because a domain missing any of them has a compliance problem, not
+            a design one — what a site *can* change is what they say.
+        --}}
+        <nav class="site-footer__legal" aria-label="Legal">
+            @foreach (\App\Services\LegalPage::all() as $legalPage)
+                <a href="{{ route($legalPage->routeName()) }}">{{ $legalPage->footerLabel() }}</a>
+            @endforeach
+        </nav>
+
         <div>
             &copy; {{ date('Y') }} {{ $site->name }}. All models are 18+.
             Content sourced from Chaturbate under their

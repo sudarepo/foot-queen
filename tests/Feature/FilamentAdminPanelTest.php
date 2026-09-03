@@ -12,6 +12,7 @@ use App\Models\PageViewEvent;
 use App\Models\Site;
 use App\Models\User;
 use App\Services\HomepageAbTest;
+use App\Services\LegalPage;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -153,6 +154,151 @@ class FilamentAdminPanelTest extends TestCase
         $this->actingAs($user)->get('/admin/sites')->assertSuccessful();
         $this->actingAs($user)->get('/admin/sites/create')->assertSuccessful();
         $this->actingAs($user)->get("/admin/sites/{$site->id}/edit")->assertSuccessful();
+    }
+
+    /**
+     * The legal tab lists all four pages whether or not this site has ever
+     * touched them — a page you can't find in here reads as a page the site
+     * doesn't have, and every site has all four.
+     */
+    public function test_the_legal_tab_lists_every_page_and_says_which_are_standard(): void
+    {
+        $user = User::factory()->create();
+        $site = Site::factory()->create([
+            'legal_pages' => [LegalPage::Dmca->value => ['body' => '<p>Ours.</p>']],
+        ]);
+
+        $response = $this->actingAs($user)->get("/admin/sites/{$site->id}/edit");
+
+        foreach (LegalPage::all() as $page) {
+            $response->assertSee($page->title());
+        }
+
+        $response->assertSee('Rewritten for this site — /dmca', escape: false);
+        $response->assertSee('Standard text — /2257', escape: false);
+    }
+
+    public function test_an_admin_can_rewrite_a_legal_page_from_the_site_form(): void
+    {
+        $user = User::factory()->create();
+        $site = Site::factory()->create();
+
+        Livewire::actingAs($user)
+            ->test(EditSite::class, ['record' => $site->getRouteKey()])
+            ->fillForm([
+                'legal_contact_email' => 'legal@example.com',
+                'legal_pages' => [
+                    LegalPage::Terms->value => [
+                        'title' => 'House Rules',
+                        'body' => '<p>Be excellent to each other.</p>',
+                    ],
+                ],
+            ])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $site->refresh();
+
+        $this->assertSame('legal@example.com', $site->legal_contact_email);
+        $this->assertSame('House Rules', $site->legalOverride(LegalPage::Terms, 'title'));
+        $this->assertNull($site->legalOverride(LegalPage::Dmca, 'body'));
+
+        $this->get('http://'.$site->primaryDomain().'/terms-and-conditions')
+            ->assertSee('Be excellent to each other.');
+    }
+
+    /**
+     * The way an admin is meant to start an override: load the standard text
+     * into the editor and edit it, rather than write a legal page from
+     * scratch. It has to arrive written out for *this* site.
+     */
+    public function test_the_legal_tab_can_load_the_standard_text_into_the_editor(): void
+    {
+        $user = User::factory()->create();
+        $site = Site::factory()->onDomain('bbwcams.test')->create(['name' => 'BBW Cams']);
+
+        $component = Livewire::actingAs($user)
+            ->test(EditSite::class, ['record' => $site->getRouteKey()])
+            ->callFormComponentAction(
+                'legal_pages.'.LegalPage::Dmca->value.'.body',
+                'loadDefault_'.LegalPage::Dmca->value,
+            );
+
+        /**
+         * The editor holds its state as a rich text document rather than as
+         * the HTML string that was handed to it, so what is asserted here is
+         * that the standard text arrived in it — written out for this site,
+         * not for some other one.
+         */
+        $loaded = json_encode(data_get($component->get('data'), 'legal_pages.'.LegalPage::Dmca->value.'.body'));
+
+        $this->assertStringContainsString('BBW Cams', $loaded);
+        $this->assertStringContainsString('abuse@bbwcams.test', $loaded);
+        $this->assertStringContainsString('Sending a notice of claimed infringement', $loaded);
+
+        // Loading it is not saving it — the site is still on the standard text.
+        $this->assertNull($site->fresh()->legalOverride(LegalPage::Dmca, 'body'));
+    }
+
+    /**
+     * The whole point of "use the standard text" is that it is a starting
+     * point you save. A rich text editor round-trips what it is given through
+     * its own document model, so this checks the page that comes out the other
+     * side is still the document that went in — headings, lists and links
+     * intact — rather than a wall of text.
+     */
+    public function test_the_standard_text_survives_being_loaded_edited_and_saved(): void
+    {
+        $user = User::factory()->create();
+        $site = Site::factory()->onDomain('bbwcams.test')->create(['name' => 'BBW Cams']);
+        $field = 'legal_pages.'.LegalPage::Dmca->value.'.body';
+
+        $component = Livewire::actingAs($user)
+            ->test(EditSite::class, ['record' => $site->getRouteKey()])
+            ->callFormComponentAction($field, 'loadDefault_'.LegalPage::Dmca->value)
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $saved = $site->fresh()->legalOverride(LegalPage::Dmca, 'body');
+
+        $this->assertNotNull($saved, 'The loaded text was not stored as an override.');
+
+        $response = $this->get('http://bbwcams.test/dmca')->assertOk();
+
+        $response->assertSee('Sending a notice of claimed infringement');
+        $response->assertSee('Counter-notification');
+        $response->assertSee('bbwcams.test');
+        // The list of statutory elements is a list, not one run-on paragraph.
+        $response->assertSee('<li>', escape: false);
+        // And the links out of it still work.
+        $response->assertSee('chaturbate.com', escape: false);
+    }
+
+    /**
+     * Opening the site record and pressing save must not quietly take over
+     * the legal pages: an untouched rich text editor hands back `<p></p>`,
+     * which stored as an override would serve four blank pages.
+     */
+    public function test_saving_a_site_without_touching_the_legal_tab_leaves_it_on_the_standard_text(): void
+    {
+        $user = User::factory()->create();
+        $site = Site::factory()->create();
+
+        Livewire::actingAs($user)
+            ->test(EditSite::class, ['record' => $site->getRouteKey()])
+            ->fillForm(['name' => 'Renamed'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $site->refresh();
+
+        foreach (LegalPage::all() as $page) {
+            $this->assertNull($site->legalOverride($page, 'body'), $page->value.' was overridden by a plain save');
+        }
+
+        $this->get('http://'.$site->primaryDomain().'/dmca')
+            ->assertOk()
+            ->assertSee('Sending a notice of claimed infringement');
     }
 
     /**

@@ -4,9 +4,13 @@ namespace App\Filament\Resources\Sites\Schemas;
 
 use App\Models\Site;
 use App\Services\HomepageLayout;
+use App\Services\LegalPage;
+use App\Services\LegalPageResolver;
+use Filament\Actions\Action;
 use Filament\Forms\Components\ColorPicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Repeater;
+use Filament\Forms\Components\RichEditor;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\Textarea;
@@ -15,6 +19,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Group;
 use Filament\Schemas\Components\Image;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\Text;
@@ -46,6 +51,7 @@ class SiteForm
                         self::layoutTab(),
                         self::contentTab(),
                         self::copyTab(),
+                        self::legalTab(),
                         self::trackingTab(),
                     ]),
             ]);
@@ -397,6 +403,127 @@ class SiteForm
                     ->helperText('Which file under config/seo-pages/ supplies this site\'s landing pages (/girls, /blonde, …). Sites in the same niche can share one. Adding a registry means adding a file there.')
                     ->columnSpanFull(),
             ]);
+    }
+
+    /**
+     * The four legal pages, as text this site can rewrite.
+     *
+     * Every site already serves all four out of the shared defaults in
+     * resources/views/legal/defaults, with its own name, domain and contact
+     * address filled in — so everything here is optional, and an empty field
+     * is not a missing page. It means "keep following the standard text",
+     * which is also how a correction to that text reaches every site that
+     * hasn't deliberately gone its own way.
+     */
+    private static function legalTab(): Tab
+    {
+        return Tab::make('Legal')
+            ->icon('heroicon-o-scale')
+            ->schema([
+                Text::make('This site already serves all four of these pages — they are linked in the footer of every page, and each one is written out for this site with its name, domain and contact address in it. Nothing here needs filling in for that to work.'),
+
+                Text::make('Fill something in only to depart from the standard wording on this site. "Use the standard text" drops the current wording into the editor so you can edit it rather than start from a blank page; emptying the editor again puts the page back on the standard text, including any later improvement to it.')
+                    ->color('gray'),
+
+                TextInput::make('legal_contact_email')
+                    ->label('Legal contact address')
+                    ->email()
+                    ->maxLength(190)
+                    ->placeholder(fn (?Site $record): string => 'abuse@'.($record?->primaryDomain() ?? 'example.com'))
+                    ->helperText('Where the four pages tell people to send DMCA notices, privacy requests and reports of content that should not be online. Empty derives abuse@ at this site\'s first domain — which only works if that mailbox exists, so set an address you actually read.')
+                    ->columnSpanFull(),
+
+                ...array_map(self::legalPageSection(...), LegalPage::all()),
+
+                Text::make('The standard text describes what this network actually does: it hosts nothing, embeds everything from Chaturbate, and takes no payments. It is a starting point written to fit that, not legal advice — have a lawyer read it before a site takes real traffic.')
+                    ->color('gray'),
+            ]);
+    }
+
+    /**
+     * One page's overrides, collapsed until opened — four rich editors' worth
+     * of legal prose expanded at once would bury every other field on the tab.
+     */
+    private static function legalPageSection(LegalPage $page): Section
+    {
+        $titleField = "legal_pages.{$page->value}.title";
+        $bodyField = "legal_pages.{$page->value}.body";
+
+        return Section::make($page->title())
+            ->description(fn (?Site $record): string => $record && app(LegalPageResolver::class)->isOverridden($record, $page)
+                ? 'Rewritten for this site — /'.$page->slug()
+                : 'Standard text — /'.$page->slug())
+            ->collapsed()
+            ->schema([
+                TextInput::make($titleField)
+                    ->label('Page heading')
+                    ->maxLength(160)
+                    ->placeholder($page->title())
+                    ->helperText('Shown as the page\'s heading and in the browser tab. Empty uses the standard heading.')
+                    ->dehydrateStateUsing(fn (?string $state): ?string => filled(trim((string) $state)) ? trim((string) $state) : null),
+
+                RichEditor::make($bodyField)
+                    ->label('Page text')
+                    ->toolbarButtons([
+                        ['bold', 'italic', 'link'],
+                        ['h2', 'h3'],
+                        ['bulletList', 'orderedList'],
+                        ['undo', 'redo'],
+                    ])
+                    ->hintAction(
+                        Action::make('loadDefault_'.$page->value)
+                            ->label('Use the standard text')
+                            ->icon('heroicon-m-arrow-down-tray')
+                            ->requiresConfirmation()
+                            ->modalHeading('Replace the editor contents?')
+                            ->modalDescription('The standard text for this page, written out for this site, is put into the editor. Nothing is saved until you save the record — and anything already typed in the editor is replaced.')
+                            ->modalSubmitActionLabel('Load it')
+                            ->action(fn (Set $set, Get $get, ?Site $record) => $set(
+                                $bodyField,
+                                app(LegalPageResolver::class)->defaultBody(self::siteForPreview($get, $record), $page),
+                            )),
+                    )
+                    ->helperText('Empty means this site serves the standard text — which is what you want unless this site genuinely needs to say something different.')
+                    /**
+                     * A rich text editor that has been opened and left alone
+                     * hands back `<p></p>` rather than nothing. Stored as-is
+                     * that is an override with no text in it, so merely
+                     * opening this tab and saving would serve four blank legal
+                     * pages. Empty markup is stored as null instead — the same
+                     * "no opinion" the field started in.
+                     */
+                    ->dehydrateStateUsing(fn (?string $state): ?string => Site::isBlankRichText($state) ? null : $state)
+                    ->columnSpanFull(),
+            ]);
+    }
+
+    /**
+     * The site the standard text should be written out for.
+     *
+     * Built from what is on screen rather than from the saved row, so the name
+     * and contact address someone has just typed are what they see in the
+     * loaded text — including on a site being created, which has no row yet.
+     */
+    private static function siteForPreview(Get $get, ?Site $record): Site
+    {
+        $site = $record ? clone $record : new Site;
+
+        return $site->fill([
+            'name' => $get('name') ?: ($site->name ?: 'This site'),
+            /**
+             * The domains repeater is `->simple()`, which unwraps to a plain
+             * list only when the form is dehydrated. Live state is still the
+             * repeater's own shape — rows keyed by UUID, each holding the
+             * field — so it is flattened back to a list of hostnames here.
+             */
+            'domains' => collect($get('domains'))
+                ->flatten()
+                ->filter(fn (mixed $domain): bool => is_string($domain) && filled($domain))
+                ->values()
+                ->all(),
+            'legal_contact_email' => $get('legal_contact_email'),
+            'ga_measurement_id' => $get('ga_measurement_id'),
+        ]);
     }
 
     private static function trackingTab(): Tab

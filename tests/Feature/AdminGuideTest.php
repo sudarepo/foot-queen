@@ -42,7 +42,7 @@ class AdminGuideTest extends TestCase
 
         $response = $this->actingAs($user)->get('/admin/guide')->assertSuccessful();
 
-        foreach (['Identity', 'Branding', 'Homepage layout', 'Content', 'Copy &amp; SEO', 'Tracking'] as $tab) {
+        foreach (['Identity', 'Branding', 'Homepage layout', 'Content', 'Copy &amp; SEO', 'Legal', 'Tracking'] as $tab) {
             $response->assertSee($tab, false);
         }
     }

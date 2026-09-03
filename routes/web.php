@@ -1,7 +1,9 @@
 <?php
 
 use App\Http\Controllers\CamController;
+use App\Http\Controllers\LegalController;
 use App\Http\Controllers\SitemapController;
+use App\Services\LegalPage;
 use App\Services\SeoPageResolver;
 use Illuminate\Support\Facades\Route;
 
@@ -36,6 +38,21 @@ Route::get('/sitemap.xml', [SitemapController::class, 'sitemap'])
 
 Route::get('/robots.txt', [SitemapController::class, 'robots'])
     ->name('robots');
+
+/*
+ * Legal pages — 2257, privacy, terms, DMCA.
+ *
+ * Every site serves all four, out of shared default text with its own name,
+ * domain and contact address filled in, until an admin rewrites one for that
+ * site (see LegalPageResolver). They are declared before the landing-page loop
+ * so a registry slug can never take one of these paths away from a domain that
+ * is legally required to serve it.
+ */
+foreach (LegalPage::all() as $legalPage) {
+    Route::get('/'.$legalPage->slug(), [LegalController::class, 'show'])
+        ->defaults('legalPage', $legalPage)
+        ->name($legalPage->routeName());
+}
 
 /*
  * Landing pages.
