@@ -153,21 +153,7 @@ class ForgeDomainProvisioner
         $rows = $response->json('domains', []);
 
         return collect(is_array($rows) ? $rows : [])
-            ->map(function (mixed $domain): ?string {
-                if (is_string($domain)) {
-                    return Str::lower(trim($domain));
-                }
-
-                if (! is_array($domain)) {
-                    return null;
-                }
-
-                $value = $domain['name'] ?? $domain['domain'] ?? null;
-
-                return is_string($value) && filled($value)
-                    ? Str::lower(trim($value))
-                    : null;
-            })
+            ->flatMap(fn (mixed $row): array => $this->extractDomainNames($row))
             ->filter()
             ->values();
     }
@@ -190,19 +176,56 @@ class ForgeDomainProvisioner
         $rows = $response->json('certificates', []);
 
         return collect(is_array($rows) ? $rows : [])
-            ->map(function (mixed $certificate): ?string {
-                if (! is_array($certificate)) {
-                    return null;
-                }
-
-                $value = $certificate['domain'] ?? $certificate['name'] ?? null;
-
-                return is_string($value) && filled($value)
-                    ? Str::lower(trim($value))
-                    : null;
-            })
+            ->flatMap(fn (mixed $row): array => $this->extractDomainNames($row))
             ->filter()
             ->values();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function extractDomainNames(mixed $value): array
+    {
+        $domains = [];
+        $queue = [$value];
+
+        while ($queue !== []) {
+            $current = array_shift($queue);
+
+            if (is_string($current)) {
+                $candidate = trim($current);
+                if ($candidate !== '') {
+                    $host = parse_url($candidate, PHP_URL_HOST) ?: $candidate;
+                    $domains[] = Str::lower(trim($host));
+                }
+
+                continue;
+            }
+
+            if (! is_array($current)) {
+                continue;
+            }
+
+            foreach (['name', 'domain', 'host', 'hostname', 'value', 'full_domain', 'fullDomain'] as $key) {
+                if (isset($current[$key]) && (is_string($current[$key]) || is_array($current[$key]))) {
+                    $queue[] = $current[$key];
+                }
+            }
+
+            if (isset($current['domains']) && is_array($current['domains'])) {
+                foreach ($current['domains'] as $nested) {
+                    $queue[] = $nested;
+                }
+            }
+
+            foreach ($current as $nested) {
+                if (is_string($nested) || is_array($nested)) {
+                    $queue[] = $nested;
+                }
+            }
+        }
+
+        return array_values(array_unique(array_filter($domains, fn (?string $domain): bool => filled($domain))));
     }
 
     private function forge(): PendingRequest

@@ -15,7 +15,6 @@ use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
-use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
@@ -180,9 +179,9 @@ class SitesTable
 
     private static function forgeStatusFor(Site $site): string
     {
-        $domain = self::primaryDomainFromSite($site);
+        $domains = self::siteDomains($site);
 
-        if ($domain === null) {
+        if ($domains === []) {
             return self::FORGE_STATUS_NO_DOMAIN;
         }
 
@@ -196,7 +195,8 @@ class SitesTable
             return self::FORGE_STATUS_UNKNOWN;
         }
 
-        return in_array($domain, $state['domains'], true)
+        return collect($domains)
+            ->contains(fn (string $domain): bool => in_array($domain, $state['domains'], true))
             ? self::FORGE_STATUS_PROVISIONED
             : self::FORGE_STATUS_MISSING;
     }
@@ -271,18 +271,23 @@ class SitesTable
         }
     }
 
-    private static function primaryDomainFromSite(Site $site): ?string
+    /**
+     * @return array<int, string>
+     */
+    private static function siteDomains(Site $site): array
     {
-        $domain = Arr::first($site->domains ?? [], fn (mixed $domain): bool => is_string($domain) && filled($domain));
-
-        return is_string($domain) ? Str::lower(trim($domain)) : null;
+        return collect($site->domains ?? [])
+            ->map(fn (mixed $domain): ?string => is_string($domain) ? Str::lower(trim($domain)) : null)
+            ->filter(fn (?string $domain): bool => filled($domain))
+            ->values()
+            ->all();
     }
 
     private static function forgeSslStatusFor(Site $site): string
     {
-        $domain = self::primaryDomainFromSite($site);
+        $domains = self::siteDomains($site);
 
-        if ($domain === null) {
+        if ($domains === []) {
             return self::FORGE_SSL_STATUS_NO_DOMAIN;
         }
 
@@ -296,7 +301,8 @@ class SitesTable
             return self::FORGE_SSL_STATUS_UNKNOWN;
         }
 
-        return in_array($domain, $state['certificates'], true)
+        return collect($domains)
+            ->contains(fn (string $domain): bool => in_array($domain, $state['certificates'], true))
             ? self::FORGE_SSL_STATUS_PROVISIONED
             : self::FORGE_SSL_STATUS_MISSING;
     }
