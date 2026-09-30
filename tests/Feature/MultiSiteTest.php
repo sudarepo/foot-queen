@@ -383,9 +383,9 @@ class MultiSiteTest extends TestCase
                 'results' => [[
                     'username' => 'anna',
                     'gender' => 'f',
-                    // 'pawg' is in no featured-categories list, so it would be
-                    // dropped entirely if only `categories` were stored.
-                    'tags' => ['Feet', 'pawg'],
+                    // 'wifematerial' is in no featured-categories list, so it
+                    // would be dropped entirely if only `categories` were stored.
+                    'tags' => ['Feet', 'wifematerial'],
                     'current_show' => 'public',
                     'num_users' => 10,
                     'chat_room_url_revshare' => 'https://chaturbate.com/anna/',
@@ -395,7 +395,7 @@ class MultiSiteTest extends TestCase
 
         $cams = app(ChaturbateProvider::class)->fetchCams();
 
-        $this->assertSame(['feet', 'pawg'], $cams[0]['tags']);
+        $this->assertSame(['feet', 'wifematerial'], $cams[0]['tags']);
         $this->assertSame(['feet'], $cams[0]['categories']);
     }
 

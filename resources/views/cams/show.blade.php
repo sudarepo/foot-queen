@@ -2,6 +2,10 @@
 
 @section('bodyClass', 'is-profile-page')
 
+@section('topBanner')
+    @include('ads._slot', ['placement' => \App\Services\AdPlacement::VideoPageHeader])
+@endsection
+
 @php
     use Illuminate\Support\Number;
 

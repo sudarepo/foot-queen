@@ -46,6 +46,7 @@ class Guide extends Page
             $this->homepageLayout(),
             $this->contentTab(),
             $this->copyAndSeo(),
+            $this->legal(),
             $this->tracking(),
             $this->launchingASite(),
             $this->abTest(),
@@ -252,6 +253,26 @@ class Guide extends Page
                     'Profile description phrase' => 'Describes a performer who has written no bio: "anna — live feet and foot fetish cam (24yo, blonde)".',
                     'SEO pages registry' => 'Which set of landing pages (/girls, /blonde, …) this site publishes. Sites in the same niche can share one; adding a new set means adding a file to the codebase, so this list is fixed until a developer extends it.',
                 ]),
+            ]);
+    }
+
+    private function legal(): Section
+    {
+        return Section::make('Legal — the four required pages')
+            ->icon(Heroicon::OutlinedScale)
+            ->collapsible()
+            ->schema([
+                Text::make('Every site publishes four legal pages — 2257, Privacy Policy, Terms and Conditions, and DMCA — linked in the footer of every page it serves. They exist from the moment a site is created: each one is written out for that site, with its name, its domain and its contact address already in it. There is nothing on this tab you have to fill in for that to be true.'),
+                $this->fields([
+                    'Legal contact address' => 'Where the four pages tell people to send DMCA notices, privacy requests and reports of content that should not be online. Left empty they derive abuse@ at the site\'s first domain — which is only useful if that mailbox exists and someone reads it.',
+                    'The four page sections' => 'Each is collapsed, and each says whether this site is on the standard text or has its own. Open one only to make this site say something different.',
+                    'Use the standard text' => 'Puts the current standard wording into the editor so you can edit it instead of starting from an empty box.',
+                    'Page heading' => 'Optional. Changes the heading and the browser tab title for that page on this site only.',
+                ]),
+                Text::make('An empty editor is not a missing page — it means "keep following the standard text". That is worth leaving alone where you can: the standard text is shared, so a correction to it reaches every site still following it, while a site that has been rewritten keeps whatever was typed until someone edits it again. Emptying the editor puts a page back on the shared text.')
+                    ->color('gray'),
+                Text::make('The standard text describes what this network actually does — it hosts nothing, embeds everything from Chaturbate, and takes no payments on its own domains. If that ever stops being true of a site, its pages have to be rewritten, and the 2257 statement first. Either way this is a starting point written to fit the setup, not legal advice: have a lawyer read it before a site takes real traffic.')
+                    ->color('warning'),
             ]);
     }
 

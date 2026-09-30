@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Cam;
 use App\Models\Site;
+use App\Services\LegalPage;
 use App\Services\SeoPageResolver;
 use Illuminate\Http\Response;
 
@@ -67,6 +68,21 @@ class SitemapController extends Controller
                 'lastmod' => $today,
                 'changefreq' => $page['changefreq'],
                 'priority' => number_format((float) $page['priority'], 1),
+            ];
+        }
+
+        /**
+         * The legal pages. Low priority and rarely changing — they exist in
+         * here so they are discoverable and attributable to the domain, which
+         * is part of what makes them count as published, not so they compete
+         * for crawl budget with the listings.
+         */
+        foreach (LegalPage::all() as $page) {
+            $urls[] = [
+                'loc' => url('/'.$page->slug()),
+                'lastmod' => $today,
+                'changefreq' => 'yearly',
+                'priority' => '0.1',
             ];
         }
 

@@ -31,8 +31,12 @@
             <label class="filter">
                 <span class="filter__label">{{ $field['label'] }}</span>
                 <select name="{{ $param }}" aria-label="{{ $field['label'] }}" onchange="this.form.submit()">
+                    {{-- Cast both sides: a purely numeric category slug such as
+                         "18" comes back from the option map as an int key, and
+                         a strict compare against the string filter would never
+                         mark it selected. --}}
                     @foreach ($filterMeta[$param] as $value => $label)
-                        <option value="{{ $value }}" @selected(($filters[$field['key']] ?? '') === $value)>
+                        <option value="{{ $value }}" @selected((string) ($filters[$field['key']] ?? '') === (string) $value)>
                             {{ $label }}
                         </option>
                     @endforeach
