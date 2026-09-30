@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AdTrackingController;
 use App\Http\Controllers\CamController;
 use App\Http\Controllers\LegalController;
 use App\Http\Controllers\SitemapController;
@@ -38,6 +39,14 @@ Route::get('/sitemap.xml', [SitemapController::class, 'sitemap'])
 
 Route::get('/robots.txt', [SitemapController::class, 'robots'])
     ->name('robots');
+
+Route::middleware('signed')->group(function () {
+    Route::get('/ads/{ad}/track/{placement}/{token}/impression', [AdTrackingController::class, 'impression'])
+        ->name('ads.impressions.store');
+
+    Route::get('/ads/{ad}/track/{placement}/{token}/click', [AdTrackingController::class, 'click'])
+        ->name('ads.clicks.store');
+});
 
 /*
  * Legal pages — 2257, privacy, terms, DMCA.

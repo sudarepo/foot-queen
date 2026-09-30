@@ -142,6 +142,63 @@ a { color: inherit; text-decoration: none; }
     padding: 24px;
 }
 
+/* ---------- Ads ---------- */
+
+.ad-slot {
+    position: relative;
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 24px 24px 0;
+}
+
+.ad-slot__link {
+    display: block;
+    width: 100%;
+    max-width: 728px;
+    margin: 0 auto;
+}
+
+.ad-slot__image,
+.ad-slot__fallback {
+    display: block;
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-raised);
+}
+
+.ad-slot__image {
+    height: auto;
+}
+
+.ad-slot__fallback {
+    padding: 18px 20px;
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+}
+
+.ad-slot__pixel {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+
+@media (max-width: 767px) {
+    .ad-slot {
+        padding-inline: 16px;
+    }
+
+    .ad-slot__link {
+        max-width: 100%;
+    }
+}
+
 /* ---------- Filters ---------- */
 
 .filters-bar {

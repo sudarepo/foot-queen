@@ -89,4 +89,37 @@ class SyncForgeDomainsCommandTest extends TestCase
 
         Http::assertSentCount(4);
     }
+
+    public function test_it_can_retry_certificates_without_adding_domains(): void
+    {
+        config()->set('services.forge.base_url', 'https://forge.example.test/api/v1');
+        config()->set('services.forge.token', 'forge-token');
+        config()->set('services.forge.server_id', '10');
+        config()->set('services.forge.site_id', '99');
+
+        Site::factory()->create([
+            'slug' => 'retry-site',
+            'name' => 'Retry Site',
+            'domains' => ['retry-domain.example'],
+            'is_active' => true,
+        ]);
+
+        Http::fake([
+            'https://forge.example.test/api/v1/servers/10/sites/99/certificates' => Http::response([
+                'certificates' => [],
+            ], 200),
+            'https://forge.example.test/api/v1/servers/10/sites/99/certificates/letsencrypt' => Http::response([
+                'certificate' => ['domain' => 'retry-domain.example'],
+            ], 201),
+        ]);
+
+        $this->artisan('sites:sync-forge-domains', [
+            '--site' => 'retry-site',
+            '--certificates-only' => true,
+        ])
+            ->expectsOutputToContain('certificate request submitted')
+            ->assertExitCode(0);
+
+        Http::assertSentCount(2);
+    }
 }

@@ -22,9 +22,9 @@ class ForgeDomainProvisioner
      * @param  Collection<int, Site>  $sites
      * @return array{added:int, skipped_existing_domain:int, requested_certificates:int, skipped_existing_certificate:int, failures:int, operations:array<int, string>}
      */
-    public function sync(Collection $sites, bool $requestCertificates, bool $dryRun): array
+    public function sync(Collection $sites, bool $requestCertificates, bool $dryRun, bool $requestDomains = true): array
     {
-        $existingDomains = $this->fetchExistingDomains();
+        $existingDomains = $requestDomains ? $this->fetchExistingDomains() : collect();
         $existingCertificates = $requestCertificates ? $this->fetchExistingCertificates() : collect();
 
         $summary = [
@@ -45,28 +45,30 @@ class ForgeDomainProvisioner
                 ->values();
 
             foreach ($domains as $domain) {
-                if ($existingDomains->contains($domain)) {
-                    $summary['skipped_existing_domain']++;
-                    $summary['operations'][] = "{$domain}: already present in Forge";
-                } else {
-                    if ($dryRun) {
-                        $summary['added']++;
-                        $summary['operations'][] = "{$domain}: would add domain in Forge";
+                if ($requestDomains) {
+                    if ($existingDomains->contains($domain)) {
+                        $summary['skipped_existing_domain']++;
+                        $summary['operations'][] = "{$domain}: already present in Forge";
                     } else {
-                        $response = $this->forge()->post($this->domainsEndpoint(), [
-                            'domain' => $domain,
-                        ]);
+                        if ($dryRun) {
+                            $summary['added']++;
+                            $summary['operations'][] = "{$domain}: would add domain in Forge";
+                        } else {
+                            $response = $this->forge()->post($this->domainsEndpoint(), [
+                                'domain' => $domain,
+                            ]);
 
-                        if ($response->failed()) {
-                            $summary['failures']++;
-                            $summary['operations'][] = "{$domain}: failed to add domain (".$this->responseMessage($response).')';
+                            if ($response->failed()) {
+                                $summary['failures']++;
+                                $summary['operations'][] = "{$domain}: failed to add domain (".$this->responseMessage($response).')';
 
-                            continue;
+                                continue;
+                            }
+
+                            $summary['added']++;
+                            $summary['operations'][] = "{$domain}: domain added in Forge";
+                            $existingDomains->push($domain);
                         }
-
-                        $summary['added']++;
-                        $summary['operations'][] = "{$domain}: domain added in Forge";
-                        $existingDomains->push($domain);
                     }
                 }
 
@@ -114,6 +116,23 @@ class ForgeDomainProvisioner
     public function existingDomains(): Collection
     {
         return $this->fetchExistingDomains();
+    }
+
+    /**
+     * @return Collection<int, string>
+     */
+    public function existingCertificates(): Collection
+    {
+        return $this->fetchExistingCertificates();
+    }
+
+    /**
+     * @param  Collection<int, Site>  $sites
+     * @return array{requested_certificates:int, skipped_existing_certificate:int, failures:int, operations:array<int, string>}
+     */
+    public function requestCertificates(Collection $sites, bool $dryRun): array
+    {
+        return $this->sync($sites, requestCertificates: true, dryRun: $dryRun, requestDomains: false);
     }
 
     /**

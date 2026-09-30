@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Builder;
     {--site= : Restrict sync to one site id or slug}
     {--with-inactive : Include inactive sites}
     {--skip-certificates : Add missing domains only, without requesting SSL certs}
+    {--certificates-only : Request SSL certificates only, without adding domains}
     {--dry-run : Report what would happen without creating Forge resources}')]
 #[Description('Sync site domains to Laravel Forge and optionally request Let\'s Encrypt certificates')]
 class SyncForgeDomains extends Command
@@ -54,11 +55,18 @@ class SyncForgeDomains extends Command
             return self::SUCCESS;
         }
 
-        $requestCertificates = ! (bool) $this->option('skip-certificates');
+        $certificatesOnly = (bool) $this->option('certificates-only');
+        $requestCertificates = $certificatesOnly || ! (bool) $this->option('skip-certificates');
         $dryRun = (bool) $this->option('dry-run');
+        $requestDomains = ! $certificatesOnly;
 
         try {
-            $result = $provisioner->sync($sites, requestCertificates: $requestCertificates, dryRun: $dryRun);
+            $result = $provisioner->sync(
+                $sites,
+                requestCertificates: $requestCertificates,
+                dryRun: $dryRun,
+                requestDomains: $requestDomains,
+            );
         } catch (\Throwable $exception) {
             report($exception);
             $this->error($exception->getMessage());

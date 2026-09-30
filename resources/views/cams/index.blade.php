@@ -1,5 +1,9 @@
 @extends('layouts.app')
 
+@section('topBanner')
+    @include('ads._slot', ['placement' => \App\Services\AdPlacement::HomepageHeader])
+@endsection
+
 @section('content')
     @include('cams._structured-data')
 

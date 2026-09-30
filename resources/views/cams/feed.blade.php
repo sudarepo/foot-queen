@@ -2,6 +2,10 @@
 
 @section('bodyClass', 'is-feed-page')
 
+@section('topBanner')
+    @include('ads._slot', ['placement' => \App\Services\AdPlacement::HomepageHeader])
+@endsection
+
 @push('head')
     {{-- Warm the connection ahead of the first preview — skips DNS/TCP/TLS
          setup (can be several hundred ms) on the request that actually
