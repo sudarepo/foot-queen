@@ -142,6 +142,10 @@ class ForgeDomainProvisioner
     {
         $response = $this->forge()->get($this->domainsEndpoint());
 
+        if ($response->status() === 404) {
+            return collect();
+        }
+
         if ($response->failed()) {
             throw new \RuntimeException('Unable to read existing Forge domains: '.$this->responseMessage($response));
         }
@@ -175,6 +179,10 @@ class ForgeDomainProvisioner
     {
         $response = $this->forge()->get($this->allCertificatesEndpoint());
 
+        if ($response->status() === 404) {
+            return collect();
+        }
+
         if ($response->failed()) {
             throw new \RuntimeException('Unable to read existing Forge certificates: '.$this->responseMessage($response));
         }
@@ -204,7 +212,7 @@ class ForgeDomainProvisioner
             ->asJson()
             ->withToken($this->token())
             ->timeout(30)
-            ->retry(2, 200);
+            ->retry(2, 200, null, false);
     }
 
     private function domainsEndpoint(): string
