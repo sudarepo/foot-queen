@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Site;
+use App\Services\Forge\ForgeDomainProvisioner;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -121,5 +122,38 @@ class SyncForgeDomainsCommandTest extends TestCase
             ->assertExitCode(0);
 
         Http::assertSentCount(2);
+    }
+
+    public function test_it_handles_404s_when_reading_existing_forge_resources(): void
+    {
+        config()->set('services.forge.base_url', 'https://forge.example.test/api/v1');
+        config()->set('services.forge.token', 'forge-token');
+        config()->set('services.forge.server_id', '10');
+        config()->set('services.forge.site_id', '99');
+
+        $site = Site::factory()->create([
+            'name' => 'Missing site',
+            'domains' => ['new-domain.example'],
+            'is_active' => true,
+        ]);
+
+        Http::fake([
+            'https://forge.example.test/api/v1/servers/10/sites/99/domains' => Http::sequence()
+                ->push(['message' => 'Not Found'], 404)
+                ->push(['message' => 'Not Found'], 404)
+                ->push(['domain' => ['domain' => 'new-domain.example']], 201),
+            'https://forge.example.test/api/v1/servers/10/sites/99/certificates' => Http::sequence()
+                ->push(['message' => 'Not Found'], 404)
+                ->push(['message' => 'Not Found'], 404),
+            'https://forge.example.test/api/v1/servers/10/sites/99/certificates/letsencrypt' => Http::response([
+                'certificate' => ['domain' => 'new-domain.example'],
+            ], 201),
+        ]);
+
+        $result = app(ForgeDomainProvisioner::class)->sync(collect([$site]), true, false);
+
+        $this->assertSame(1, $result['added']);
+        $this->assertSame(1, $result['requested_certificates']);
+        $this->assertSame(0, $result['failures']);
     }
 }
