@@ -35,4 +35,11 @@ return [
         ],
     ],
 
+    'forge' => [
+        'base_url' => env('FORGE_API_URL', 'https://forge.laravel.com/api/v1'),
+        'token' => env('FORGE_API_TOKEN'),
+        'server_id' => env('FORGE_SERVER_ID'),
+        'site_id' => env('FORGE_SITE_ID'),
+    ],
+
 ];

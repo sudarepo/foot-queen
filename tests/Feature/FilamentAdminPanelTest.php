@@ -156,6 +156,58 @@ class FilamentAdminPanelTest extends TestCase
         $this->actingAs($user)->get("/admin/sites/{$site->id}/edit")->assertSuccessful();
     }
 
+    public function test_admins_can_see_the_sites_csv_import_action(): void
+    {
+        $admin = User::factory()->create(['is_admin' => true]);
+
+        $this->actingAs($admin)
+            ->get('/admin/sites')
+            ->assertSuccessful()
+            ->assertSee('Import CSV', false);
+    }
+
+    public function test_site_managers_cannot_see_the_sites_csv_import_action(): void
+    {
+        $site = Site::query()->where('is_default', true)->firstOrFail();
+        $manager = User::factory()->siteManager($site)->create();
+
+        $this->actingAs($manager)
+            ->get('/admin/sites')
+            ->assertSuccessful()
+            ->assertDontSee('Import CSV', false);
+    }
+
+    public function test_admins_can_see_the_forge_domain_sync_action(): void
+    {
+        $admin = User::factory()->create(['is_admin' => true]);
+
+        $this->actingAs($admin)
+            ->get('/admin/sites')
+            ->assertSuccessful()
+            ->assertSee('Sync Domains to Forge', false);
+    }
+
+    public function test_site_managers_cannot_see_the_forge_domain_sync_action(): void
+    {
+        $site = Site::query()->where('is_default', true)->firstOrFail();
+        $manager = User::factory()->siteManager($site)->create();
+
+        $this->actingAs($manager)
+            ->get('/admin/sites')
+            ->assertSuccessful()
+            ->assertDontSee('Sync Domains to Forge', false);
+    }
+
+    public function test_the_sites_list_shows_the_forge_status_column(): void
+    {
+        $admin = User::factory()->create(['is_admin' => true]);
+
+        $this->actingAs($admin)
+            ->get('/admin/sites')
+            ->assertSuccessful()
+            ->assertSee('Forge', false);
+    }
+
     /**
      * The legal tab lists all four pages whether or not this site has ever
      * touched them — a page you can't find in here reads as a page the site
