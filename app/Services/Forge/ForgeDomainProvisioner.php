@@ -143,7 +143,7 @@ class ForgeDomainProvisioner
         $response = $this->forge()->get($this->domainsEndpoint());
 
         if ($response->status() === 404) {
-            return collect();
+            throw new \RuntimeException('Unable to read existing Forge domains: HTTP 404 - Forge site configuration may be wrong; check FORGE_SERVER_ID and FORGE_SITE_ID.');
         }
 
         if ($response->failed()) {
@@ -166,7 +166,7 @@ class ForgeDomainProvisioner
         $response = $this->forge()->get($this->allCertificatesEndpoint());
 
         if ($response->status() === 404) {
-            return collect();
+            throw new \RuntimeException('Unable to read existing Forge certificates: HTTP 404 - Forge site configuration may be wrong; check FORGE_SERVER_ID and FORGE_SITE_ID.');
         }
 
         if ($response->failed()) {
