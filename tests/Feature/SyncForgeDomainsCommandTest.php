@@ -124,37 +124,23 @@ class SyncForgeDomainsCommandTest extends TestCase
         Http::assertSentCount(2);
     }
 
-    public function test_it_handles_404s_when_reading_existing_forge_resources(): void
+    public function test_it_throws_when_forge_404s_while_checking_existing_resources(): void
     {
         config()->set('services.forge.base_url', 'https://forge.example.test/api/v1');
         config()->set('services.forge.token', 'forge-token');
         config()->set('services.forge.server_id', '10');
         config()->set('services.forge.site_id', '99');
 
-        $site = Site::factory()->create([
-            'name' => 'Missing site',
-            'domains' => ['new-domain.example'],
-            'is_active' => true,
-        ]);
-
         Http::fake([
-            'https://forge.example.test/api/v1/servers/10/sites/99/domains' => Http::sequence()
-                ->push(['message' => 'Not Found'], 404)
-                ->push(['message' => 'Not Found'], 404)
-                ->push(['domain' => ['domain' => 'new-domain.example']], 201),
-            'https://forge.example.test/api/v1/servers/10/sites/99/certificates' => Http::sequence()
-                ->push(['message' => 'Not Found'], 404)
-                ->push(['message' => 'Not Found'], 404),
-            'https://forge.example.test/api/v1/servers/10/sites/99/certificates/letsencrypt' => Http::response([
-                'certificate' => ['domain' => 'new-domain.example'],
-            ], 201),
+            'https://forge.example.test/api/v1/servers/10/sites/99/domains' => Http::response([
+                'message' => 'Not Found',
+            ], 404),
         ]);
 
-        $result = app(ForgeDomainProvisioner::class)->sync(collect([$site]), true, false);
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Unable to read existing Forge domains');
 
-        $this->assertSame(1, $result['added']);
-        $this->assertSame(1, $result['requested_certificates']);
-        $this->assertSame(0, $result['failures']);
+        app(ForgeDomainProvisioner::class)->existingDomains();
     }
 
     public function test_it_recognizes_nested_forge_domain_and_certificate_payloads(): void
