@@ -156,4 +156,39 @@ class SyncForgeDomainsCommandTest extends TestCase
         $this->assertSame(1, $result['requested_certificates']);
         $this->assertSame(0, $result['failures']);
     }
+
+    public function test_it_recognizes_nested_forge_domain_and_certificate_payloads(): void
+    {
+        config()->set('services.forge.base_url', 'https://forge.example.test/api/v1');
+        config()->set('services.forge.token', 'forge-token');
+        config()->set('services.forge.server_id', '10');
+        config()->set('services.forge.site_id', '99');
+
+        $site = Site::factory()->create([
+            'name' => 'Nested Site',
+            'domains' => ['nested.example.com'],
+            'is_active' => true,
+        ]);
+
+        Http::fake([
+            'https://forge.example.test/api/v1/servers/10/sites/99/domains' => Http::response([
+                'domains' => [
+                    ['name' => 'nested.example.com'],
+                    ['domain' => 'www.nested.example.com'],
+                ],
+            ], 200),
+            'https://forge.example.test/api/v1/servers/10/sites/99/certificates' => Http::response([
+                'certificates' => [
+                    ['domains' => ['nested.example.com']],
+                    ['name' => 'www.nested.example.com'],
+                ],
+            ], 200),
+        ]);
+
+        $result = app(ForgeDomainProvisioner::class)->sync(collect([$site]), true, false);
+
+        $this->assertSame(0, $result['added']);
+        $this->assertSame(0, $result['requested_certificates']);
+        $this->assertSame(0, $result['failures']);
+    }
 }
