@@ -37,6 +37,7 @@ class AdResourceTest extends TestCase
             ->get('/admin/ads')
             ->assertSuccessful()
             ->assertSee('Ads', false)
+            ->assertSee('Add ad', false)
             ->assertSee('Impressions', false)
             ->assertSee('Clicks', false);
 
