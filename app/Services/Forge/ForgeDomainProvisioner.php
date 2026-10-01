@@ -9,6 +9,10 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 
+/**
+ * Talks to the org-scoped Forge API (https://forge.laravel.com/api/orgs/{org}),
+ * which returns JSON:API documents and manages certificates per domain record.
+ */
 class ForgeDomainProvisioner
 {
     public function isConfigured(): bool
@@ -24,8 +28,8 @@ class ForgeDomainProvisioner
      */
     public function sync(Collection $sites, bool $requestCertificates, bool $dryRun, bool $requestDomains = true): array
     {
-        $existingDomains = $requestDomains ? $this->fetchExistingDomains() : collect();
-        $existingCertificates = $requestCertificates ? $this->fetchExistingCertificates() : collect();
+        $domainIds = $this->fetchDomainRecords();
+        $existingCertificates = $requestCertificates ? $this->certificateDomains($domainIds) : collect();
 
         $summary = [
             'added' => 0,
@@ -46,29 +50,29 @@ class ForgeDomainProvisioner
 
             foreach ($domains as $domain) {
                 if ($requestDomains) {
-                    if ($existingDomains->contains($domain)) {
+                    if ($domainIds->has($domain)) {
                         $summary['skipped_existing_domain']++;
                         $summary['operations'][] = "{$domain}: already present in Forge";
+                    } elseif ($dryRun) {
+                        $summary['added']++;
+                        $summary['operations'][] = "{$domain}: would add domain in Forge";
                     } else {
-                        if ($dryRun) {
-                            $summary['added']++;
-                            $summary['operations'][] = "{$domain}: would add domain in Forge";
-                        } else {
-                            $response = $this->forge()->post($this->domainsEndpoint(), [
-                                'domain' => $domain,
-                            ]);
+                        $response = $this->forge()->post($this->domainsEndpoint(), [
+                            'name' => $domain,
+                            'allow_wildcard_subdomains' => false,
+                            'www_redirect_type' => 'from-www',
+                        ]);
 
-                            if ($response->failed()) {
-                                $summary['failures']++;
-                                $summary['operations'][] = "{$domain}: failed to add domain (".$this->responseMessage($response).')';
+                        if ($response->failed()) {
+                            $summary['failures']++;
+                            $summary['operations'][] = "{$domain}: failed to add domain (".$this->responseMessage($response).')';
 
-                                continue;
-                            }
-
-                            $summary['added']++;
-                            $summary['operations'][] = "{$domain}: domain added in Forge";
-                            $existingDomains->push($domain);
+                            continue;
                         }
+
+                        $summary['added']++;
+                        $summary['operations'][] = "{$domain}: domain added in Forge";
+                        $domainIds->put($domain, (string) $response->json('data.id'));
                     }
                 }
 
@@ -90,8 +94,22 @@ class ForgeDomainProvisioner
                     continue;
                 }
 
-                $response = $this->forge()->post($this->certificatesEndpoint(), [
-                    'domains' => [$domain],
+                $domainId = $domainIds->get($domain);
+
+                if (blank($domainId)) {
+                    $summary['failures']++;
+                    $summary['operations'][] = "{$domain}: cannot request certificate, domain is not in Forge";
+
+                    continue;
+                }
+
+                $response = $this->forge()->post($this->domainCertificatesEndpoint($domainId), [
+                    'type' => 'letsencrypt',
+                    'enable' => true,
+                    'letsencrypt' => [
+                        'verification_method' => 'http-01',
+                        'key_type' => 'ecdsa',
+                    ],
                 ]);
 
                 if ($response->failed()) {
@@ -115,15 +133,17 @@ class ForgeDomainProvisioner
      */
     public function existingDomains(): Collection
     {
-        return $this->fetchExistingDomains();
+        return $this->fetchDomainRecords()->keys()->values();
     }
 
     /**
+     * Domains that currently have an installed, active certificate.
+     *
      * @return Collection<int, string>
      */
     public function existingCertificates(): Collection
     {
-        return $this->fetchExistingCertificates();
+        return $this->certificateDomains($this->fetchDomainRecords());
     }
 
     /**
@@ -136,96 +156,84 @@ class ForgeDomainProvisioner
     }
 
     /**
+     * @return Collection<string, string> domain name => Forge domain record id
+     */
+    private function fetchDomainRecords(): Collection
+    {
+        return $this->fetchAll($this->domainsEndpoint(), 'domains')
+            ->filter(fn (array $row): bool => is_string($row['attributes']['name'] ?? null) && isset($row['id']))
+            ->mapWithKeys(fn (array $row): array => [
+                Str::lower(trim($row['attributes']['name'])) => (string) $row['id'],
+            ]);
+    }
+
+    /**
+     * Certificates only reference their domain through the `links.self` URL
+     * (…/domains/{id}/certificates/{id}), so they are mapped back to names
+     * through the domain records.
+     *
+     * @param  Collection<string, string>  $domainIds
      * @return Collection<int, string>
      */
-    private function fetchExistingDomains(): Collection
+    private function certificateDomains(Collection $domainIds): Collection
     {
-        $response = $this->forge()->get($this->domainsEndpoint());
+        $namesById = $domainIds->flip();
 
-        if ($response->status() === 404) {
-            throw new \RuntimeException('Unable to read existing Forge domains: HTTP 404 - Forge site configuration may be wrong; check FORGE_SERVER_ID and FORGE_SITE_ID.');
-        }
+        return $this->fetchAll($this->certificatesEndpoint(), 'certificates')
+            ->filter(fn (array $row): bool => ($row['attributes']['status'] ?? null) === 'installed'
+                && ($row['attributes']['active'] ?? false) === true)
+            ->map(function (array $row) use ($namesById): ?string {
+                $href = (string) ($row['links']['self']['href'] ?? '');
 
-        if ($response->failed()) {
-            throw new \RuntimeException('Unable to read existing Forge domains: '.$this->responseMessage($response));
-        }
+                if (preg_match('#/domains/([^/]+)/certificates/#', $href, $matches) !== 1) {
+                    return null;
+                }
 
-        $rows = $response->json('domains', []);
-
-        return collect(is_array($rows) ? $rows : [])
-            ->flatMap(fn (mixed $row): array => $this->extractDomainNames($row))
+                return $namesById->get($matches[1]);
+            })
             ->filter()
+            ->unique()
             ->values();
     }
 
     /**
-     * @return Collection<int, string>
+     * Follows Forge's cursor pagination and returns every JSON:API row.
+     *
+     * @return Collection<int, array<string, mixed>>
      */
-    private function fetchExistingCertificates(): Collection
+    private function fetchAll(string $endpoint, string $resource): Collection
     {
-        $response = $this->forge()->get($this->allCertificatesEndpoint());
+        $rows = collect();
+        $cursor = null;
 
-        if ($response->status() === 404) {
-            throw new \RuntimeException('Unable to read existing Forge certificates: HTTP 404 - Forge site configuration may be wrong; check FORGE_SERVER_ID and FORGE_SITE_ID.');
-        }
+        do {
+            $query = ['page[size]' => 100];
 
-        if ($response->failed()) {
-            throw new \RuntimeException('Unable to read existing Forge certificates: '.$this->responseMessage($response));
-        }
-
-        $rows = $response->json('certificates', []);
-
-        return collect(is_array($rows) ? $rows : [])
-            ->flatMap(fn (mixed $row): array => $this->extractDomainNames($row))
-            ->filter()
-            ->values();
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function extractDomainNames(mixed $value): array
-    {
-        $domains = [];
-        $queue = [$value];
-
-        while ($queue !== []) {
-            $current = array_shift($queue);
-
-            if (is_string($current)) {
-                $candidate = trim($current);
-                if ($candidate !== '') {
-                    $host = parse_url($candidate, PHP_URL_HOST) ?: $candidate;
-                    $domains[] = Str::lower(trim($host));
-                }
-
-                continue;
+            if ($cursor !== null) {
+                $query['page[cursor]'] = $cursor;
             }
 
-            if (! is_array($current)) {
-                continue;
+            $response = $this->forge()->get($endpoint, $query);
+
+            if ($response->status() === 404) {
+                throw new \RuntimeException("Unable to read existing Forge {$resource}: HTTP 404 - Forge site configuration may be wrong; check FORGE_API_URL, FORGE_SERVER_ID and FORGE_SITE_ID.");
             }
 
-            foreach (['name', 'domain', 'host', 'hostname', 'value', 'full_domain', 'fullDomain'] as $key) {
-                if (isset($current[$key]) && (is_string($current[$key]) || is_array($current[$key]))) {
-                    $queue[] = $current[$key];
-                }
+            if ($response->failed()) {
+                throw new \RuntimeException("Unable to read existing Forge {$resource}: ".$this->responseMessage($response));
             }
 
-            if (isset($current['domains']) && is_array($current['domains'])) {
-                foreach ($current['domains'] as $nested) {
-                    $queue[] = $nested;
-                }
+            $data = $response->json('data');
+
+            if (! is_array($data)) {
+                throw new \RuntimeException("Unable to read existing Forge {$resource}: unexpected response format - FORGE_API_URL should look like https://forge.laravel.com/api/orgs/{organization}.");
             }
 
-            foreach ($current as $nested) {
-                if (is_string($nested) || is_array($nested)) {
-                    $queue[] = $nested;
-                }
-            }
-        }
+            $rows = $rows->concat(array_filter($data, 'is_array'));
+            $cursor = $response->json('meta.next_cursor');
+        } while (is_string($cursor) && $cursor !== '');
 
-        return array_values(array_unique(array_filter($domains, fn (?string $domain): bool => filled($domain))));
+        return $rows->values();
     }
 
     private function forge(): PendingRequest
@@ -243,14 +251,14 @@ class ForgeDomainProvisioner
         return sprintf('/servers/%s/sites/%s/domains', $this->serverId(), $this->siteId());
     }
 
-    private function allCertificatesEndpoint(): string
+    private function certificatesEndpoint(): string
     {
         return sprintf('/servers/%s/sites/%s/certificates', $this->serverId(), $this->siteId());
     }
 
-    private function certificatesEndpoint(): string
+    private function domainCertificatesEndpoint(string $domainId): string
     {
-        return sprintf('/servers/%s/sites/%s/certificates/letsencrypt', $this->serverId(), $this->siteId());
+        return sprintf('/servers/%s/sites/%s/domains/%s/certificates', $this->serverId(), $this->siteId(), $domainId);
     }
 
     private function token(): string

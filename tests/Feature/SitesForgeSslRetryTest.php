@@ -17,7 +17,7 @@ class SitesForgeSslRetryTest extends TestCase
         /** @var User $admin */
         $admin = User::factory()->create(['is_admin' => true]);
 
-        config()->set('services.forge.base_url', 'https://forge.example.test/api/v1');
+        config()->set('services.forge.base_url', 'https://forge.example.test/api/orgs/acme');
         config()->set('services.forge.token', 'forge-token');
         config()->set('services.forge.server_id', '10');
         config()->set('services.forge.site_id', '99');
@@ -29,11 +29,11 @@ class SitesForgeSslRetryTest extends TestCase
         ]);
 
         Http::fake([
-            'https://forge.example.test/api/v1/servers/10/sites/99/domains' => Http::response([
-                'domains' => [['domain' => 'ssl-missing.example']],
+            'https://forge.example.test/api/orgs/acme/servers/10/sites/99/domains?*' => Http::response([
+                'data' => [['id' => '1', 'type' => 'domainRecords', 'attributes' => ['name' => 'ssl-missing.example']]],
             ], 200),
-            'https://forge.example.test/api/v1/servers/10/sites/99/certificates' => Http::response([
-                'certificates' => [],
+            'https://forge.example.test/api/orgs/acme/servers/10/sites/99/certificates?*' => Http::response([
+                'data' => [],
             ], 200),
         ]);
 
