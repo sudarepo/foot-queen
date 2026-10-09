@@ -2,7 +2,10 @@
 
 namespace App\Filament\Resources\Sites\Pages;
 
+use App\Filament\Resources\Sites\ForgeSyncNotification;
 use App\Filament\Resources\Sites\SiteResource;
+use App\Models\Site;
+use App\Services\Forge\ForgeDomainProvisioner;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Forms\Components\FileUpload;
@@ -10,6 +13,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
@@ -73,22 +77,6 @@ class ListSites extends ListRecords
 
                         $output = trim(Artisan::output());
 
-                        if ($exitCode === 0 && (bool) ($data['sync_forge'] ?? false)) {
-                            $forgeExitCode = Artisan::call('sites:sync-forge-domains', [
-                                '--dry-run' => (bool) ($data['dry_run'] ?? false),
-                            ]);
-
-                            $forgeOutput = trim(Artisan::output());
-
-                            $output = collect([$output, $forgeOutput])
-                                ->filter(fn (string $part): bool => $part !== '')
-                                ->implode("\n\n");
-
-                            if ($forgeExitCode !== 0) {
-                                $exitCode = $forgeExitCode;
-                            }
-                        }
-
                         $notification = Notification::make()
                             ->title($exitCode === 0 ? 'CSV processed' : 'Import failed')
                             ->body($output !== '' ? $output : null);
@@ -97,6 +85,10 @@ class ListSites extends ListRecords
                             $notification->success()->send();
                         } else {
                             $notification->danger()->send();
+                        }
+
+                        if ($exitCode === 0 && (bool) ($data['sync_forge'] ?? false)) {
+                            $this->syncForge(dryRun: (bool) ($data['dry_run'] ?? false));
                         }
                     } catch (Throwable $exception) {
                         report($exception);
@@ -131,36 +123,47 @@ class ListSites extends ListRecords
                 ->requiresConfirmation()
                 ->modalHeading('Sync domains to Forge')
                 ->modalDescription('Push site domains to Forge and optionally request Let\'s Encrypt certificates for them.')
-                ->action(function (array $data): void {
-                    try {
-                        $exitCode = Artisan::call('sites:sync-forge-domains', [
-                            '--dry-run' => (bool) ($data['dry_run'] ?? true),
-                            '--skip-certificates' => (bool) ($data['skip_certificates'] ?? false),
-                            '--with-inactive' => (bool) ($data['with_inactive'] ?? false),
-                        ]);
-
-                        $output = trim(Artisan::output());
-
-                        $notification = Notification::make()
-                            ->title($exitCode === 0 ? 'Forge sync finished' : 'Forge sync failed')
-                            ->body($output !== '' ? $output : null);
-
-                        if ($exitCode === 0) {
-                            $notification->success()->send();
-                        } else {
-                            $notification->danger()->send();
-                        }
-                    } catch (Throwable $exception) {
-                        report($exception);
-
-                        Notification::make()
-                            ->title('Forge sync failed')
-                            ->body('An unexpected error occurred while syncing domains to Forge.')
-                            ->danger()
-                            ->send();
-                    }
-                }),
+                ->action(fn (array $data) => $this->syncForge(
+                    dryRun: (bool) ($data['dry_run'] ?? true),
+                    requestCertificates: ! (bool) ($data['skip_certificates'] ?? false),
+                    withInactive: (bool) ($data['with_inactive'] ?? false),
+                )),
             CreateAction::make(),
         ];
+    }
+
+    private function syncForge(bool $dryRun, bool $requestCertificates = true, bool $withInactive = false): void
+    {
+        $provisioner = app(ForgeDomainProvisioner::class);
+
+        if (! $provisioner->isConfigured()) {
+            Notification::make()
+                ->title('Forge is not configured')
+                ->body('Set FORGE_API_TOKEN, FORGE_SERVER_ID and FORGE_SITE_ID.')
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        $sites = Site::query()
+            ->when(! $withInactive, fn (Builder $query): Builder => $query->where('is_active', true))
+            ->get();
+
+        try {
+            $result = $provisioner->sync($sites, requestCertificates: $requestCertificates, dryRun: $dryRun);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            Notification::make()
+                ->title('Forge sync failed')
+                ->body(e($exception->getMessage()))
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        ForgeSyncNotification::make($result, $dryRun)->send();
     }
 }

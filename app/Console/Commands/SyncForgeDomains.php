@@ -74,34 +74,23 @@ class SyncForgeDomains extends Command
             return self::FAILURE;
         }
 
-        foreach ($result['operations'] as $operation) {
-            $this->line("- {$operation}");
-        }
-
-        if ($dryRun) {
-            if ($result['operations'] === []) {
-                $this->info('Dry run: no changes would be made.');
-
-                return self::SUCCESS;
-            }
-
-            $this->newLine();
-            $this->info(sprintf(
-                'Dry run: %d domain adds, %d certificate requests would be made.',
-                $result['added'],
-                $result['requested_certificates'],
-            ));
+        if ($result['operations'] === []) {
+            $this->info($dryRun ? 'Dry run: no changes would be made.' : 'Forge is already up to date.');
 
             return self::SUCCESS;
         }
 
+        foreach ($result['operations'] as $operation) {
+            $this->line("- {$operation['domain']}: ".$this->describe($operation, $dryRun));
+        }
+
         $this->newLine();
         $this->info(sprintf(
-            'Summary: %d domain adds, %d existing domains skipped, %d certificate requests, %d existing certificates skipped, %d failures.',
+            $dryRun
+                ? 'Dry run: %d domain adds, %d certificate requests would be made.'
+                : 'Done: %d domain adds, %d certificate requests, %d failures.',
             $result['added'],
-            $result['skipped_existing_domain'],
             $result['requested_certificates'],
-            $result['skipped_existing_certificate'],
             $result['failures'],
         ));
 
@@ -110,5 +99,23 @@ class SyncForgeDomains extends Command
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * @param  array{domain:string, action:string, status:string, error:?string}  $operation
+     */
+    private function describe(array $operation, bool $dryRun): string
+    {
+        $isDomain = $operation['action'] === ForgeDomainProvisioner::ACTION_ADD_DOMAIN;
+
+        if ($operation['status'] === ForgeDomainProvisioner::STATUS_FAILED) {
+            return ($isDomain ? 'failed to add domain' : 'failed to request certificate')." ({$operation['error']})";
+        }
+
+        if ($dryRun) {
+            return $isDomain ? 'would add domain in Forge' : "would request Let's Encrypt certificate";
+        }
+
+        return $isDomain ? 'domain added in Forge' : 'certificate request submitted';
     }
 }

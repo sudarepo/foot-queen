@@ -15,6 +15,16 @@ use Illuminate\Support\Str;
  */
 class ForgeDomainProvisioner
 {
+    public const ACTION_ADD_DOMAIN = 'add_domain';
+
+    public const ACTION_REQUEST_CERTIFICATE = 'request_certificate';
+
+    public const STATUS_PLANNED = 'planned';
+
+    public const STATUS_DONE = 'done';
+
+    public const STATUS_FAILED = 'failed';
+
     public function isConfigured(): bool
     {
         return filled($this->token())
@@ -23,8 +33,12 @@ class ForgeDomainProvisioner
     }
 
     /**
+     * Only actions taken (or, in a dry run, actions that would be taken) are
+     * reported in `operations`; domains and certificates already in Forge are
+     * counted in the `skipped_*` totals but otherwise left out.
+     *
      * @param  Collection<int, Site>  $sites
-     * @return array{added:int, skipped_existing_domain:int, requested_certificates:int, skipped_existing_certificate:int, failures:int, operations:array<int, string>}
+     * @return array{added:int, skipped_existing_domain:int, requested_certificates:int, skipped_existing_certificate:int, failures:int, operations:array<int, array{domain:string, action:string, status:string, error:?string}>}
      */
     public function sync(Collection $sites, bool $requestCertificates, bool $dryRun, bool $requestDomains = true): array
     {
@@ -40,6 +54,8 @@ class ForgeDomainProvisioner
             'operations' => [],
         ];
 
+        $succeeded = $dryRun ? self::STATUS_PLANNED : self::STATUS_DONE;
+
         /** @var Site $site */
         foreach ($sites as $site) {
             $domains = collect($site->domains ?? [])
@@ -52,13 +68,9 @@ class ForgeDomainProvisioner
                 if ($requestDomains) {
                     if ($domainIds->has($domain)) {
                         $summary['skipped_existing_domain']++;
-
-                        if (! $dryRun) {
-                            $summary['operations'][] = "{$domain}: already present in Forge";
-                        }
                     } elseif ($dryRun) {
                         $summary['added']++;
-                        $summary['operations'][] = "{$domain}: would add domain in Forge";
+                        $summary['operations'][] = $this->operation($domain, self::ACTION_ADD_DOMAIN, $succeeded);
                     } else {
                         $response = $this->forge()->post($this->domainsEndpoint(), [
                             'name' => $domain,
@@ -68,13 +80,13 @@ class ForgeDomainProvisioner
 
                         if ($response->failed()) {
                             $summary['failures']++;
-                            $summary['operations'][] = "{$domain}: failed to add domain (".$this->responseMessage($response).')';
+                            $summary['operations'][] = $this->operation($domain, self::ACTION_ADD_DOMAIN, self::STATUS_FAILED, $this->responseMessage($response));
 
                             continue;
                         }
 
                         $summary['added']++;
-                        $summary['operations'][] = "{$domain}: domain added in Forge";
+                        $summary['operations'][] = $this->operation($domain, self::ACTION_ADD_DOMAIN, $succeeded);
                         $domainIds->put($domain, (string) $response->json('data.id'));
                     }
                 }
@@ -86,16 +98,12 @@ class ForgeDomainProvisioner
                 if ($existingCertificates->contains($domain)) {
                     $summary['skipped_existing_certificate']++;
 
-                    if (! $dryRun) {
-                        $summary['operations'][] = "{$domain}: certificate already present in Forge";
-                    }
-
                     continue;
                 }
 
                 if ($dryRun) {
                     $summary['requested_certificates']++;
-                    $summary['operations'][] = "{$domain}: would request Let's Encrypt certificate";
+                    $summary['operations'][] = $this->operation($domain, self::ACTION_REQUEST_CERTIFICATE, $succeeded);
 
                     continue;
                 }
@@ -104,7 +112,7 @@ class ForgeDomainProvisioner
 
                 if (blank($domainId)) {
                     $summary['failures']++;
-                    $summary['operations'][] = "{$domain}: cannot request certificate, domain is not in Forge";
+                    $summary['operations'][] = $this->operation($domain, self::ACTION_REQUEST_CERTIFICATE, self::STATUS_FAILED, 'domain is not in Forge');
 
                     continue;
                 }
@@ -120,18 +128,31 @@ class ForgeDomainProvisioner
 
                 if ($response->failed()) {
                     $summary['failures']++;
-                    $summary['operations'][] = "{$domain}: failed to request certificate (".$this->responseMessage($response).')';
+                    $summary['operations'][] = $this->operation($domain, self::ACTION_REQUEST_CERTIFICATE, self::STATUS_FAILED, $this->responseMessage($response));
 
                     continue;
                 }
 
                 $summary['requested_certificates']++;
-                $summary['operations'][] = "{$domain}: certificate request submitted";
+                $summary['operations'][] = $this->operation($domain, self::ACTION_REQUEST_CERTIFICATE, $succeeded);
                 $existingCertificates->push($domain);
             }
         }
 
         return $summary;
+    }
+
+    /**
+     * @return array{domain:string, action:string, status:string, error:?string}
+     */
+    private function operation(string $domain, string $action, string $status, ?string $error = null): array
+    {
+        return [
+            'domain' => $domain,
+            'action' => $action,
+            'status' => $status,
+            'error' => $error,
+        ];
     }
 
     /**
@@ -154,7 +175,7 @@ class ForgeDomainProvisioner
 
     /**
      * @param  Collection<int, Site>  $sites
-     * @return array{requested_certificates:int, skipped_existing_certificate:int, failures:int, operations:array<int, string>}
+     * @return array{added:int, skipped_existing_domain:int, requested_certificates:int, skipped_existing_certificate:int, failures:int, operations:array<int, array{domain:string, action:string, status:string, error:?string}>}
      */
     public function requestCertificates(Collection $sites, bool $dryRun): array
     {

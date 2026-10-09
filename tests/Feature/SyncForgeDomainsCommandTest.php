@@ -113,6 +113,51 @@ class SyncForgeDomainsCommandTest extends TestCase
             && $request['letsencrypt']['verification_method'] === 'http-01');
     }
 
+    public function test_it_only_reports_actions_taken_and_not_resources_already_in_forge(): void
+    {
+        Site::factory()->create([
+            'name' => 'Mixed Site',
+            'domains' => ['new-domain.example', 'already-there.example'],
+            'is_active' => true,
+        ]);
+
+        Http::fake([
+            self::BASE.'/domains?*' => Http::response($this->domainsPayload(['1' => 'already-there.example'])),
+            self::BASE.'/domains' => Http::response(['data' => ['id' => '55', 'type' => 'domainRecords', 'attributes' => ['name' => 'new-domain.example']]], 201),
+            self::BASE.'/certificates?*' => Http::response($this->certificatesPayload(['1' => 'installed'])),
+            self::BASE.'/domains/55/certificates' => Http::response(['data' => ['id' => '900', 'type' => 'certificates']], 201),
+        ]);
+
+        $this->artisan('sites:sync-forge-domains')
+            ->expectsOutputToContain('new-domain.example: domain added in Forge')
+            ->expectsOutputToContain('new-domain.example: certificate request submitted')
+            ->doesntExpectOutputToContain('already-there.example')
+            ->doesntExpectOutputToContain('already present')
+            ->expectsOutputToContain('Done: 1 domain adds, 1 certificate requests, 0 failures.')
+            ->assertExitCode(0);
+    }
+
+    public function test_it_reports_when_forge_is_already_up_to_date(): void
+    {
+        Site::factory()->create([
+            'name' => 'Existing Site',
+            'domains' => ['already-there.example'],
+            'is_active' => true,
+        ]);
+
+        Http::fake([
+            self::BASE.'/domains?*' => Http::response($this->domainsPayload(['1' => 'already-there.example'])),
+            self::BASE.'/certificates?*' => Http::response($this->certificatesPayload(['1' => 'installed'])),
+        ]);
+
+        $this->artisan('sites:sync-forge-domains')
+            ->expectsOutputToContain('Forge is already up to date.')
+            ->doesntExpectOutputToContain('already-there.example')
+            ->assertExitCode(0);
+
+        Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST');
+    }
+
     public function test_it_can_retry_certificates_without_adding_domains(): void
     {
         Site::factory()->create([
