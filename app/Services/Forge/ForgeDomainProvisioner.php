@@ -52,7 +52,10 @@ class ForgeDomainProvisioner
                 if ($requestDomains) {
                     if ($domainIds->has($domain)) {
                         $summary['skipped_existing_domain']++;
-                        $summary['operations'][] = "{$domain}: already present in Forge";
+
+                        if (! $dryRun) {
+                            $summary['operations'][] = "{$domain}: already present in Forge";
+                        }
                     } elseif ($dryRun) {
                         $summary['added']++;
                         $summary['operations'][] = "{$domain}: would add domain in Forge";
@@ -82,7 +85,10 @@ class ForgeDomainProvisioner
 
                 if ($existingCertificates->contains($domain)) {
                     $summary['skipped_existing_certificate']++;
-                    $summary['operations'][] = "{$domain}: certificate already present in Forge";
+
+                    if (! $dryRun) {
+                        $summary['operations'][] = "{$domain}: certificate already present in Forge";
+                    }
 
                     continue;
                 }
