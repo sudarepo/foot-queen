@@ -58,13 +58,7 @@ class ForgeDomainProvisioner
 
         /** @var Site $site */
         foreach ($sites as $site) {
-            $domains = collect($site->domains ?? [])
-                ->filter(fn (mixed $domain): bool => is_string($domain) && filled($domain))
-                ->map(fn (string $domain): string => Str::lower(trim($domain)))
-                ->unique()
-                ->values();
-
-            foreach ($domains as $domain) {
+            foreach ($this->siteDomains($site) as $domain) {
                 if ($requestDomains) {
                     if ($domainIds->has($domain)) {
                         $summary['skipped_existing_domain']++;
@@ -140,6 +134,39 @@ class ForgeDomainProvisioner
         }
 
         return $summary;
+    }
+
+    /**
+     * Which of the site's domains are not yet in Forge, and which domains are
+     * in Forge but have no installed certificate.
+     *
+     * @return array{missing_domains:array<int, string>, missing_certificates:array<int, string>}
+     */
+    public function siteStatus(Site $site): array
+    {
+        $domainIds = $this->fetchDomainRecords();
+        $certificates = $this->certificateDomains($domainIds);
+        $domains = $this->siteDomains($site);
+
+        return [
+            'missing_domains' => $domains->reject(fn (string $domain): bool => $domainIds->has($domain))->values()->all(),
+            'missing_certificates' => $domains
+                ->filter(fn (string $domain): bool => $domainIds->has($domain) && ! $certificates->contains($domain))
+                ->values()
+                ->all(),
+        ];
+    }
+
+    /**
+     * @return Collection<int, string>
+     */
+    private function siteDomains(Site $site): Collection
+    {
+        return collect($site->domains ?? [])
+            ->filter(fn (mixed $domain): bool => is_string($domain) && filled($domain))
+            ->map(fn (string $domain): string => Str::lower(trim($domain)))
+            ->unique()
+            ->values();
     }
 
     /**
