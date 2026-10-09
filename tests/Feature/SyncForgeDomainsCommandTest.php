@@ -36,11 +36,11 @@ class SyncForgeDomainsCommandTest extends TestCase
             ->assertExitCode(1);
     }
 
-    public function test_dry_run_reports_pending_domain_and_certificate_changes(): void
+    public function test_dry_run_reports_no_changes_when_everything_is_in_forge(): void
     {
         Site::factory()->create([
-            'name' => 'New Site',
-            'domains' => ['new-domain.example'],
+            'name' => 'Existing Site',
+            'domains' => ['already-there.example'],
             'is_active' => true,
         ]);
 
@@ -50,9 +50,29 @@ class SyncForgeDomainsCommandTest extends TestCase
         ]);
 
         $this->artisan('sites:sync-forge-domains', ['--dry-run' => true])
-            ->expectsOutputToContain('would add domain in Forge')
-            ->expectsOutputToContain("would request Let's Encrypt certificate")
-            ->expectsOutputToContain('Summary: 1 domain adds')
+            ->doesntExpectOutputToContain('already present')
+            ->expectsOutputToContain('Dry run: no changes would be made.')
+            ->assertExitCode(0);
+    }
+
+    public function test_dry_run_reports_pending_domain_and_certificate_changes(): void
+    {
+        Site::factory()->create([
+            'name' => 'New Site',
+            'domains' => ['new-domain.example', 'already-there.example'],
+            'is_active' => true,
+        ]);
+
+        Http::fake([
+            self::BASE.'/domains?*' => Http::response($this->domainsPayload(['1' => 'already-there.example'])),
+            self::BASE.'/certificates?*' => Http::response($this->certificatesPayload(['1' => 'installed'])),
+        ]);
+
+        $this->artisan('sites:sync-forge-domains', ['--dry-run' => true])
+            ->expectsOutputToContain('new-domain.example: would add domain in Forge')
+            ->expectsOutputToContain("new-domain.example: would request Let's Encrypt certificate")
+            ->doesntExpectOutputToContain('already present')
+            ->expectsOutputToContain('Dry run: 1 domain adds, 1 certificate requests would be made.')
             ->assertExitCode(0);
 
         Http::assertSentCount(2);

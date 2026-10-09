@@ -78,6 +78,23 @@ class SyncForgeDomains extends Command
             $this->line("- {$operation}");
         }
 
+        if ($dryRun) {
+            if ($result['operations'] === []) {
+                $this->info('Dry run: no changes would be made.');
+
+                return self::SUCCESS;
+            }
+
+            $this->newLine();
+            $this->info(sprintf(
+                'Dry run: %d domain adds, %d certificate requests would be made.',
+                $result['added'],
+                $result['requested_certificates'],
+            ));
+
+            return self::SUCCESS;
+        }
+
         $this->newLine();
         $this->info(sprintf(
             'Summary: %d domain adds, %d existing domains skipped, %d certificate requests, %d existing certificates skipped, %d failures.',
