@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Sites\Tables;
 
+use App\Filament\Resources\Sites\ForgeSyncNotification;
 use App\Models\Cam;
 use App\Models\Site;
 use App\Services\DeviceDetector;
@@ -15,7 +16,6 @@ use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use Throwable;
@@ -141,32 +141,20 @@ class SitesTable
                     ->modalDescription('Requests Let\'s Encrypt certificates again for this site without re-adding its domains in Forge.')
                     ->action(function (Site $record): void {
                         try {
-                            $exitCode = Artisan::call('sites:sync-forge-domains', [
-                                '--site' => $record->getKey(),
-                                '--certificates-only' => true,
-                                '--dry-run' => false,
-                            ]);
-
-                            $output = trim(Artisan::output());
-
-                            $notification = Notification::make()
-                                ->title($exitCode === 0 ? 'SSL retry finished' : 'SSL retry failed')
-                                ->body($output !== '' ? $output : null);
-
-                            if ($exitCode === 0) {
-                                $notification->success()->send();
-                            } else {
-                                $notification->danger()->send();
-                            }
+                            $result = app(ForgeDomainProvisioner::class)->requestCertificates(collect([$record]), dryRun: false);
                         } catch (Throwable $exception) {
                             report($exception);
 
                             Notification::make()
                                 ->title('SSL retry failed')
-                                ->body('An unexpected error occurred while retrying SSL through Forge.')
+                                ->body(e($exception->getMessage()))
                                 ->danger()
                                 ->send();
+
+                            return;
                         }
+
+                        ForgeSyncNotification::make($result, dryRun: false)->send();
                     }),
                 EditAction::make(),
             ])
