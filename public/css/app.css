@@ -1281,6 +1281,11 @@ body.is-profile-page .site-main {
     padding-top: 0;
 }
 
+/* .site-main drops its top gutter here, so the banner supplies the gap. */
+body.is-profile-page .ad-slot {
+    padding-bottom: 24px;
+}
+
 /* ---------- Cover / live stage ---------- */
 
 .pf__cover {
