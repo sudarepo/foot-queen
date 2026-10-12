@@ -40,6 +40,8 @@ class AdTrackingController extends Controller
     {
         $this->ensureSignedRequest($request, $ad, $placement);
 
+        abort_if(blank($ad->destination_url), 404);
+
         if ($this->recordOnce('ad-click:'.$token)) {
             AdClick::create([
                 'ad_id' => $ad->getKey(),
