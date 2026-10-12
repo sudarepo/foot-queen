@@ -63,6 +63,15 @@ class Ad extends Model
         return AdPlacement::from($this->placement)->label();
     }
 
+    /**
+     * Third-party ad tags (e.g. an ad network's <iframe>) are rendered as-is
+     * instead of the tracked image banner.
+     */
+    public function isEmbed(): bool
+    {
+        return filled($this->embed_code);
+    }
+
     public function imageUrl(): ?string
     {
         return filled($this->image_path)

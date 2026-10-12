@@ -8,6 +8,7 @@ use App\Models\Site;
 use App\Services\AdPlacement;
 use App\Services\HomepageAbTest;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\URL;
 use Tests\TestCase;
 
 class AdServingTest extends TestCase
@@ -153,5 +154,51 @@ class AdServingTest extends TestCase
         $response->assertOk();
         $response->assertSee('Site Banner', false);
         $response->assertDontSee('Global Banner', false);
+    }
+
+    public function test_embed_code_ads_render_the_network_tag_with_an_impression_pixel(): void
+    {
+        $site = $this->bbwcamsSite();
+
+        Ad::create([
+            'site_id' => $site->id,
+            'placement' => AdPlacement::HomepageHeader->value,
+            'advertiser' => 'Ad Network',
+            'campaign' => 'Network Run',
+            'creative' => 'Network Leaderboard',
+            'embed_code' => '<iframe src="https://ads.example/if?w=728&h=90" width="728" height="90" frameborder="0" scrolling="no"></iframe>',
+            'is_active' => true,
+            'weight' => 10,
+        ]);
+
+        $response = $this->withCookie(HomepageAbTest::COOKIE_NAME, HomepageAbTest::VARIANT_GRID)
+            ->get('http://bbwcams.test/');
+
+        $response->assertOk();
+        $response->assertSee('<div class="ad-slot__embed"><iframe src="https://ads.example/if?w=728&h=90"', false);
+        $response->assertSee('ad-slot__pixel', false);
+        $response->assertDontSee('ad-slot__link', false);
+    }
+
+    public function test_clicks_on_embed_ads_without_a_destination_are_not_found(): void
+    {
+        $ad = Ad::create([
+            'placement' => AdPlacement::HomepageHeader->value,
+            'advertiser' => 'Ad Network',
+            'campaign' => 'Network Run',
+            'creative' => 'Network Leaderboard',
+            'embed_code' => '<iframe src="https://ads.example/if"></iframe>',
+            'is_active' => true,
+            'weight' => 1,
+        ]);
+
+        $clickUrl = URL::temporarySignedRoute('ads.clicks.store', now()->addDay(), [
+            'ad' => $ad->id,
+            'placement' => AdPlacement::HomepageHeader->value,
+            'token' => 'test-token',
+        ]);
+
+        $this->get($clickUrl)->assertNotFound();
+        $this->assertDatabaseCount('ad_clicks', 0);
     }
 }

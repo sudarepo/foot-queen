@@ -6,10 +6,12 @@ use App\Services\AdPlacement;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 
 class AdForm
@@ -65,15 +67,23 @@ class AdForm
                                 ->maxLength(120),
                         ]),
 
+                        Textarea::make('embed_code')
+                            ->label('Embed code')
+                            ->rows(4)
+                            ->live(onBlur: true)
+                            ->helperText('Paste an ad network tag (e.g. an <iframe>) to serve it as-is instead of an image banner. Clicks inside the embed are tracked by the network, not here.'),
+
                         TextInput::make('destination_url')
-                            ->required()
+                            ->required(fn (Get $get): bool => blank($get('embed_code')))
+                            ->visible(fn (Get $get): bool => blank($get('embed_code')))
                             ->url()
                             ->maxLength(2048)
                             ->helperText('Where the click should send the visitor.'),
 
                         FileUpload::make('image_path')
                             ->label('Banner image')
-                            ->required()
+                            ->required(fn (Get $get): bool => blank($get('embed_code')))
+                            ->visible(fn (Get $get): bool => blank($get('embed_code')))
                             ->image()
                             ->disk('public')
                             ->directory('ads')
@@ -81,6 +91,7 @@ class AdForm
                             ->helperText('Responsive banner artwork. Recommended size: 728×90 for desktop, with a mobile-safe variant if needed.'),
 
                         TextInput::make('alt_text')
+                            ->visible(fn (Get $get): bool => blank($get('embed_code')))
                             ->maxLength(160)
                             ->helperText('Fallback text if the image cannot load.'),
                     ]),

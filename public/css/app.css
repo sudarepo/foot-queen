@@ -181,6 +181,17 @@ a { color: inherit; text-decoration: none; }
     color: var(--text-dim);
 }
 
+.ad-slot__embed {
+    display: flex;
+    justify-content: center;
+    max-width: 100%;
+    overflow: hidden;
+}
+
+.ad-slot__embed iframe {
+    max-width: 100%;
+}
+
 .ad-slot__pixel {
     position: absolute;
     width: 1px;
