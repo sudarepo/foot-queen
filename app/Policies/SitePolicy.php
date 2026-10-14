@@ -45,4 +45,14 @@ class SitePolicy
     {
         return $user->isAdmin();
     }
+
+    public function restore(User $user, Site $site): bool
+    {
+        return $user->isAdmin();
+    }
+
+    public function restoreAny(User $user): bool
+    {
+        return $user->isAdmin();
+    }
 }

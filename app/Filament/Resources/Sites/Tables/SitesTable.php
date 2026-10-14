@@ -11,10 +11,13 @@ use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
+use Filament\Actions\RestoreAction;
+use Filament\Actions\RestoreBulkAction;
 use Filament\Notifications\Notification;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\TrashedFilter;
 use Filament\Tables\Table;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
@@ -130,6 +133,9 @@ class SitesTable
                     ->label('Active')
                     ->boolean(),
             ])
+            ->filters([
+                TrashedFilter::make(),
+            ])
             ->recordActions([
                 Action::make('retrySsl')
                     ->label('Retry SSL')
@@ -156,11 +162,14 @@ class SitesTable
 
                         ForgeSyncNotification::make($result, dryRun: false)->send();
                     }),
-                EditAction::make(),
+                RestoreAction::make(),
+                EditAction::make()
+                    ->hidden(fn (Site $record): bool => $record->trashed()),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
+                    RestoreBulkAction::make(),
                 ]),
             ]);
     }

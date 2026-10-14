@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 
@@ -24,6 +25,7 @@ use Illuminate\Support\Str;
 class Site extends Model
 {
     use HasFactory;
+    use SoftDeletes;
 
     /**
      * Every active site, keyed by nothing in particular — small enough that
