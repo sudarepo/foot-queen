@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\SyncForgeDomainsJob;
 use App\Mcp\Servers\AdminServer;
 use App\Mcp\Tools\Ads\CreateAd;
 use App\Mcp\Tools\Ads\GetAd;
@@ -37,6 +38,7 @@ use App\Services\HomepageLayout;
 use App\Services\LegalPage;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -472,6 +474,27 @@ class AdminMcpServerTest extends TestCase
         AdminServer::actingAs(User::factory()->create())
             ->tool(SyncForgeDomains::class, ['site' => $site->id])
             ->assertHasErrors(['Forge is not configured']);
+    }
+
+    public function test_a_live_forge_sync_from_the_mcp_server_is_queued(): void
+    {
+        Queue::fake();
+        $site = Site::factory()->create();
+        $user = User::factory()->create();
+
+        $this->mock(ForgeDomainProvisioner::class, function ($mock) {
+            $mock->shouldReceive('isConfigured')->andReturnTrue();
+            $mock->shouldReceive('isSyncing')->andReturnFalse();
+            $mock->shouldNotReceive('sync');
+        });
+
+        AdminServer::actingAs($user)
+            ->tool(SyncForgeDomains::class, ['site' => $site->id, 'dry_run' => false])
+            ->assertOk()
+            ->assertSee('queued');
+
+        Queue::assertPushed(SyncForgeDomainsJob::class, fn (SyncForgeDomainsJob $job): bool => $job->siteIds === [$site->id]
+            && $job->notifyUserId === $user->id);
     }
 
     /* ----------  Token commands  ---------- */

@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Sites\Pages;
 
 use App\Filament\Resources\Sites\ForgeSyncNotification;
 use App\Filament\Resources\Sites\SiteResource;
+use App\Jobs\SyncForgeDomainsJob;
 use App\Models\Site;
 use App\Services\Forge\ForgeDomainProvisioner;
 use App\Services\Forge\ForgeSyncInProgress;
@@ -147,6 +148,12 @@ class ListSites extends ListRecords
             return;
         }
 
+        if (! $dryRun) {
+            $this->queueForgeSync($provisioner, $requestCertificates, $withInactive);
+
+            return;
+        }
+
         $sites = Site::query()
             ->when(! $withInactive, fn (Builder $query): Builder => $query->where('is_active', true))
             ->get();
@@ -174,5 +181,34 @@ class ListSites extends ListRecords
         }
 
         ForgeSyncNotification::make($result, $dryRun)->send();
+    }
+
+    /**
+     * A live sync runs on the queue, not in this request — see
+     * SyncForgeDomainsJob for why.
+     */
+    private function queueForgeSync(ForgeDomainProvisioner $provisioner, bool $requestCertificates, bool $withInactive): void
+    {
+        if ($provisioner->isSyncing()) {
+            Notification::make()
+                ->title('Forge sync already running')
+                ->body(e((new ForgeSyncInProgress)->getMessage()))
+                ->warning()
+                ->send();
+
+            return;
+        }
+
+        SyncForgeDomainsJob::dispatch(
+            withInactive: $withInactive,
+            requestCertificates: $requestCertificates,
+            notifyUserId: Auth::id(),
+        );
+
+        Notification::make()
+            ->title('Forge sync started')
+            ->body('It runs in the background and starts within a minute. The result will appear in your notifications (the bell icon) when it finishes.')
+            ->success()
+            ->send();
     }
 }
