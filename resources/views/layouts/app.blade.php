@@ -69,14 +69,16 @@
             <link rel="apple-touch-icon" href="{{ $faviconUrl }}">
         @endif
     @else
-        {{-- Default favicon set (see README for which files to drop into /public/) --}}
+        {{--
+            The generic cam icon in public/, shared by every site that hasn't
+            uploaded its own. It only exists up to 48px, so there's no touch
+            icon or web manifest here — those would be upscaled mush, and the
+            manifest in public/ names Foot Queen.
+        --}}
         <link rel="icon" href="{{ asset('favicon.ico') }}" sizes="any">
-        <link rel="icon" type="image/svg+xml" href="{{ asset('icon.svg') }}">
         <link rel="icon" type="image/png" sizes="16x16" href="{{ asset('favicon-16x16.png') }}">
         <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('favicon-32x32.png') }}">
         <link rel="icon" type="image/png" sizes="48x48" href="{{ asset('favicon-48x48.png') }}">
-        <link rel="apple-touch-icon" sizes="180x180" href="{{ asset('apple-touch-icon.png') }}">
-        <link rel="manifest" href="{{ asset('site.webmanifest') }}">
     @endif
     <meta name="theme-color" content="{{ $site->theme_color ?? '#0b0b0d' }}">
 

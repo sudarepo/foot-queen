@@ -150,7 +150,7 @@ class SiteForm
                     field: 'favicon_path',
                     publicPath: 'favicon-48x48.png',
                     customNote: 'Favicon in use now — uploaded for this site. Upload below to replace it.',
-                    fallbackNote: 'Favicon in use now — the icon set that ships in public/, which is Foot Queen\'s. Upload below to replace it for this site.',
+                    fallbackNote: 'Favicon in use now — the generic cam icon that ships in public/. Upload below to replace it for this site.',
                     previewHeight: 32,
                 ),
 

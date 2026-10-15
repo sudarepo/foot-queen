@@ -266,12 +266,14 @@ class MultiSiteTest extends TestCase
             ->assertDontSee('apple-touch-icon', false);
     }
 
-    public function test_a_site_without_a_favicon_keeps_the_icon_set_in_public(): void
+    public function test_a_site_without_a_favicon_falls_back_to_the_generic_icon_in_public(): void
     {
         $this->get($this->defaultHost('/feed'))
             ->assertSee('<link rel="icon" href="'.asset('favicon.ico').'" sizes="any">', false)
-            ->assertSee('apple-touch-icon', false)
-            ->assertSee('site.webmanifest', false);
+            ->assertSee(asset('favicon-32x32.png'), false)
+            ->assertDontSee('icon.svg', false)
+            ->assertDontSee('apple-touch-icon', false)
+            ->assertDontSee('site.webmanifest', false);
     }
 
     /* ----------  Attribution  ---------- */
