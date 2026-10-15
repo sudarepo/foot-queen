@@ -9,6 +9,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Sleep;
 use Tests\TestCase;
 
 class SyncForgeDomainsCommandTest extends TestCase
@@ -394,6 +395,47 @@ class SyncForgeDomainsCommandTest extends TestCase
         $result = app(ForgeDomainProvisioner::class)->requestCertificates(collect([$site]), dryRun: false);
 
         $this->assertSame(1, $result['requested_certificates']);
+    }
+
+    /**
+     * Forge throttles at about 60 requests a minute; a sync of every site
+     * hits that, and must wait it out rather than fail every later domain.
+     */
+    public function test_a_rate_limited_request_waits_and_retries(): void
+    {
+        Sleep::fake();
+        $site = Site::factory()->create(['domains' => ['throttled.example']]);
+
+        Http::fake([
+            self::BASE.'/domains?*' => Http::response($this->domainsPayload([])),
+            self::BASE.'/domains' => Http::sequence()
+                ->push(['message' => 'Too many attempts. Please contact Forge support.'], 429, ['Retry-After' => '7'])
+                ->push(['data' => ['id' => '55', 'type' => 'domainRecords']], 201),
+        ]);
+
+        $result = app(ForgeDomainProvisioner::class)->sync(collect([$site]), requestCertificates: false, dryRun: false);
+
+        $this->assertSame(1, $result['added']);
+        $this->assertSame(0, $result['failures']);
+        Sleep::assertSleptTimes(1);
+        Sleep::assertSequence([Sleep::for(8000)->milliseconds()]);
+    }
+
+    public function test_a_request_forge_rejects_is_not_retried(): void
+    {
+        Sleep::fake();
+        $site = Site::factory()->create(['domains' => ['invalid.example']]);
+
+        Http::fake([
+            self::BASE.'/domains?*' => Http::response($this->domainsPayload([])),
+            self::BASE.'/domains' => Http::response(['message' => 'Invalid domain'], 422),
+        ]);
+
+        $result = app(ForgeDomainProvisioner::class)->sync(collect([$site]), requestCertificates: false, dryRun: false);
+
+        $this->assertSame(1, $result['failures']);
+        Http::assertSentCount(2);
+        Sleep::assertNeverSlept();
     }
 
     public function test_it_follows_cursor_pagination(): void
