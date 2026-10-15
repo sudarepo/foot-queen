@@ -118,6 +118,36 @@ class AiAssistantPageTest extends TestCase
             ->assertDontSee($olderPlaintext);
     }
 
+    /**
+     * Keys minted before the encrypted copy existed have no value left to
+     * show, so asking for their instructions gives them a fresh one — the old
+     * value stops working, the new one is filled into the steps and works.
+     */
+    public function test_an_older_key_without_a_saved_value_gets_a_fresh_one_with_instructions(): void
+    {
+        $admin = User::factory()->create();
+        [$legacy, $oldPlaintext] = McpToken::issue($admin, 'Made before');
+        $legacy->forceFill(['secret' => null])->save();
+        $this->actingAs($admin);
+
+        Livewire::test(AiAssistant::class)
+            ->assertDontSee('can\'t be shown again')
+            ->mountAction(TestAction::make('showSetup')->table($legacy))
+            ->assertMountedActionModalSee('mcp-remote');
+
+        $newPlaintext = $legacy->refresh()->secret;
+
+        $this->assertNotNull($newPlaintext);
+        $this->assertNotSame($oldPlaintext, $newPlaintext);
+        $this->assertSame('Made before', $legacy->name);
+
+        $this->get('/admin/ai-assistant')->assertSee($newPlaintext);
+
+        $payload = ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list', 'params' => []];
+        $this->withToken($newPlaintext)->postJson('/mcp/admin', $payload)->assertOk();
+        $this->withToken($oldPlaintext)->postJson('/mcp/admin', $payload)->assertUnauthorized();
+    }
+
     public function test_an_admin_only_sees_their_own_keys(): void
     {
         $admin = User::factory()->create();

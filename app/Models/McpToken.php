@@ -76,6 +76,32 @@ class McpToken extends Model
         return [$token, $plaintext];
     }
 
+    /**
+     * Give this key a new value in place — same name, owner and expiry —
+     * returning the new plaintext. Used for keys made before `secret`
+     * existed, whose value can't be shown because it was never kept.
+     */
+    public function regenerate(): string
+    {
+        $plaintext = self::PREFIX.Str::random(48);
+
+        $this->forceFill([
+            'token' => static::hash($plaintext),
+            'secret' => $plaintext,
+        ])->save();
+
+        return $plaintext;
+    }
+
+    /**
+     * The plaintext key, minting a fresh value first if this key predates
+     * the encrypted copy.
+     */
+    public function revealableSecret(): string
+    {
+        return $this->secret ?? $this->regenerate();
+    }
+
     public static function hash(string $plaintext): string
     {
         return hash('sha256', $plaintext);
