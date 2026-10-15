@@ -112,7 +112,7 @@ class AiAssistant extends Page implements HasTable
         return $schema->components([
             $this->introduction(),
             ...array_map(
-                fn (Section|Callout $component) => $component->visible(fn (): bool => $this->newestKey()?->secret !== null),
+                fn (Section|Callout $component) => $component->visible(fn (): bool => $this->newestKey() !== null),
                 $this->setupSections(fn (): ?McpToken => $this->newestKey()),
             ),
             Section::make('Your keys')
@@ -140,11 +140,7 @@ class AiAssistant extends Page implements HasTable
                     ->slideOver()
                     ->modalHeading(fn (McpToken $record): string => 'Setup steps for "'.$record->name.'"')
                     ->modalDescription('Everything below already has this key filled in.')
-                    ->schema(fn (McpToken $record): array => $record->secret === null
-                        ? [Callout::make('This key can\'t be shown again')
-                            ->description('It was created before keys could be looked up again. Revoke it and create a new one.')
-                            ->warning()]
-                        : $this->setupSections(fn (): McpToken => $record))
+                    ->schema(fn (McpToken $record): array => $this->setupSections(fn (): McpToken => $record))
                     ->modalSubmitAction(false)
                     ->modalCancelActionLabel('Close'),
                 Action::make('revoke')
@@ -213,7 +209,7 @@ class AiAssistant extends Page implements HasTable
      */
     private function setupSections(Closure $key): array
     {
-        $secret = fn (): string => (string) $key()?->secret;
+        $secret = fn (): string => (string) $key()?->revealableSecret();
 
         return [
             Section::make(fn (): string => 'Setting up Claude with your key "'.$key()?->name.'"')
