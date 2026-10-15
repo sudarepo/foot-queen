@@ -3,12 +3,16 @@
 namespace Tests\Feature;
 
 use App\Filament\Resources\Sites\Pages\ListSites;
+use App\Jobs\SyncForgeDomainsJob;
 use App\Models\Site;
 use App\Models\User;
+use App\Services\Forge\ForgeDomainProvisioner;
 use Filament\Notifications\Notification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -55,7 +59,40 @@ class SitesForgeSyncActionTest extends TestCase
         Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST');
     }
 
-    public function test_sync_notification_lists_actions_taken_and_failures(): void
+    /**
+     * A live sync runs on the queue: in-request, the PHP-FPM reloads each new
+     * certificate triggers would kill it part-way through.
+     */
+    public function test_a_live_sync_is_queued_instead_of_run_in_the_request(): void
+    {
+        Queue::fake();
+        Http::fake();
+
+        Livewire::test(ListSites::class)
+            ->callAction('syncForgeDomains', data: ['dry_run' => false, 'with_inactive' => true])
+            ->assertNotified('Forge sync started');
+
+        Queue::assertPushed(SyncForgeDomainsJob::class, fn (SyncForgeDomainsJob $job): bool => $job->withInactive
+            && $job->requestCertificates
+            && $job->notifyUserId === auth()->id());
+        Http::assertNothingSent();
+    }
+
+    public function test_a_live_sync_is_refused_while_another_is_running(): void
+    {
+        Queue::fake();
+        $lock = Cache::lock('forge-domain-sync', 60);
+        $lock->get();
+
+        Livewire::test(ListSites::class)
+            ->callAction('syncForgeDomains', data: ['dry_run' => false])
+            ->assertNotified('Forge sync already running');
+
+        $lock->release();
+        Queue::assertNothingPushed();
+    }
+
+    public function test_the_queued_sync_reports_actions_taken_and_failures_to_the_admin(): void
     {
         Site::factory()->create([
             'domains' => ['new-domain.example', 'broken.example', 'already-there.example'],
@@ -73,18 +110,16 @@ class SitesForgeSyncActionTest extends TestCase
             self::BASE.'/domains/55/certificates' => Http::response(['data' => ['id' => '900']], 201),
         ]);
 
-        Livewire::test(ListSites::class)
-            ->callAction('syncForgeDomains', data: ['dry_run' => false])
-            ->assertNotified(
-                Notification::make()
-                    ->title('Forge sync finished with 1 error')
-                    ->body('<p><strong>Added 1 domain</strong><br>new-domain.example</p><br><p><strong>Requested SSL for 1 domain</strong><br>new-domain.example</p><br><p><strong>Failed</strong><br><strong>broken.example</strong>: could not add domain (HTTP 422 - Invalid domain)</p>')
-                    ->persistent()
-                    ->danger(),
-            );
+        SyncForgeDomainsJob::dispatchSync(notifyUserId: auth()->id());
+
+        $notification = auth()->user()->notifications()->sole();
+
+        $this->assertSame('Forge sync finished with 1 error', $notification->data['title']);
+        $this->assertSame('<p><strong>Added 1 domain</strong><br>new-domain.example</p><br><p><strong>Requested SSL for 1 domain</strong><br>new-domain.example</p><br><p><strong>Failed</strong><br><strong>broken.example</strong>: could not add domain (HTTP 422 - Invalid domain)</p>', $notification->data['body']);
+        $this->assertFalse(app(ForgeDomainProvisioner::class)->isSyncing(), 'The sync lock was not released.');
     }
 
-    public function test_sync_notification_says_when_forge_is_up_to_date(): void
+    public function test_the_queued_sync_says_when_forge_is_up_to_date(): void
     {
         Site::factory()->create([
             'domains' => ['already-there.example'],
@@ -96,9 +131,22 @@ class SitesForgeSyncActionTest extends TestCase
             self::BASE.'/certificates?*' => Http::response($this->certificatesPayload(['1' => 'installed'])),
         ]);
 
-        Livewire::test(ListSites::class)
-            ->callAction('syncForgeDomains', data: ['dry_run' => false])
-            ->assertNotified('Forge is already up to date');
+        SyncForgeDomainsJob::dispatchSync(notifyUserId: auth()->id());
+
+        $this->assertSame('Forge is already up to date', auth()->user()->notifications()->sole()->data['title']);
+    }
+
+    public function test_a_queued_sync_that_finds_another_running_says_so(): void
+    {
+        Http::fake();
+        $lock = Cache::lock('forge-domain-sync', 60);
+        $lock->get();
+
+        SyncForgeDomainsJob::dispatchSync(notifyUserId: auth()->id());
+
+        $lock->release();
+        $this->assertSame('Forge sync already running', auth()->user()->notifications()->sole()->data['title']);
+        Http::assertNothingSent();
     }
 
     /**

@@ -26,3 +26,15 @@ Schedule::command('cams:sync-profiles')->everyFifteenMinutes()->withoutOverlappi
  * nothing new to say between updates.
  */
 Schedule::command('chaturbate:sync-stats')->hourly()->withoutOverlapping(10);
+
+/*
+ * There's no queue daemon on the server, so the scheduler drains the queue
+ * once a minute. It matters for the Forge sync above all: run from a web
+ * request, the PHP-FPM reloads each new certificate triggers kill the sync
+ * part-way through, while a CLI worker survives them. Overlap expires at 16
+ * minutes, just past the longest job (the 15-minute Forge sync).
+ */
+Schedule::command('queue:work --stop-when-empty --max-time=840 --timeout=900')
+    ->everyMinute()
+    ->withoutOverlapping(16)
+    ->runInBackground();

@@ -37,6 +37,9 @@ class AdminPanelProvider extends PanelProvider
                 fn (Panel $panel) => $panel->domain(config('app.admin_domain')),
             )
             ->login()
+            // Long-running work (the Forge sync) reports back here when it
+            // finishes, since it no longer runs inside the request.
+            ->databaseNotifications()
             ->colors([
                 'primary' => Color::hex('#e85d22'), // matches the site's accent color
             ])

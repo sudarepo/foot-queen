@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools\Operations;
 
+use App\Jobs\SyncForgeDomainsJob;
 use App\Mcp\Support\SiteLookup;
 use App\Mcp\Tools\AdminTool;
 use App\Models\Site;
@@ -14,7 +15,7 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Tools\Annotations\IsOpenWorld;
 use Throwable;
 
-#[Description('Add site domains to Laravel Forge and/or request Let\'s Encrypt certificates — the same as `php artisan sites:sync-forge-domains`. Defaults to a dry run; call again with dry_run=false to apply. DNS must already point at the server for SSL to succeed.')]
+#[Description('Add site domains to Laravel Forge and/or request Let\'s Encrypt certificates — the same as `php artisan sites:sync-forge-domains`. Defaults to a dry run; call again with dry_run=false to apply — the live sync is queued and runs in the background. DNS must already point at the server for SSL to succeed.')]
 #[IsOpenWorld]
 class SyncForgeDomains extends AdminTool
 {
@@ -43,11 +44,34 @@ class SyncForgeDomains extends AdminTool
             $sites = Site::query()->where('is_active', true)->get();
         }
 
+        $dryRun = $validated['dry_run'] ?? true;
+
+        if (! $dryRun) {
+            // Run from this request, the PHP-FPM reloads each new certificate
+            // triggers would kill the sync part-way — see SyncForgeDomainsJob.
+            if ($forge->isSyncing()) {
+                return Response::error('A Forge sync is already running. Wait for it to finish; it is handling these domains already.');
+            }
+
+            SyncForgeDomainsJob::dispatch(
+                siteIds: $sites->map(fn (Site $site): int => $site->getKey())->values()->all(),
+                requestDomains: $validated['request_domains'] ?? true,
+                requestCertificates: $validated['request_certificates'] ?? true,
+                notifyUserId: $request->user()?->getKey(),
+            );
+
+            return Response::json([
+                'queued' => true,
+                'sites' => $sites->count(),
+                'message' => 'The sync runs in the background within a minute. Its result goes to the admin panel notifications; call get-forge-status afterwards to see what changed.',
+            ]);
+        }
+
         try {
             $result = $forge->sync(
                 $sites,
                 requestCertificates: $validated['request_certificates'] ?? true,
-                dryRun: $validated['dry_run'] ?? true,
+                dryRun: true,
                 requestDomains: $validated['request_domains'] ?? true,
             );
         } catch (Throwable $exception) {
@@ -56,7 +80,7 @@ class SyncForgeDomains extends AdminTool
             return Response::error("Forge sync failed: {$exception->getMessage()}");
         }
 
-        return Response::json(['dry_run' => $validated['dry_run'] ?? true, ...$result]);
+        return Response::json(['dry_run' => true, ...$result]);
     }
 
     /**
