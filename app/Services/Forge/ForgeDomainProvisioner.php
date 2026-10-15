@@ -3,7 +3,9 @@
 namespace App\Services\Forge;
 
 use App\Models\Site;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
@@ -11,6 +13,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use Throwable;
 
 /**
  * Talks to the org-scoped Forge API (https://forge.laravel.com/api/orgs/{org}),
@@ -45,6 +48,14 @@ class ForgeDomainProvisioner
      * leave a fresh failure alone for this long.
      */
     private const FAILED_CERTIFICATE_RETRY_AFTER_MINUTES = 60;
+
+    /** Attempts per request, so a throttled one waits out several windows if it must. */
+    private const RETRIES = 4;
+
+    /** Forge's throttle window, for a 429 that doesn't say how long to wait. */
+    private const DEFAULT_RETRY_AFTER_SECONDS = 60;
+
+    private const MAX_RETRY_AFTER_SECONDS = 120;
 
     public function isConfigured(): bool
     {
@@ -414,7 +425,47 @@ class ForgeDomainProvisioner
             ->asJson()
             ->withToken($this->token())
             ->timeout(30)
-            ->retry(2, 200, null, false);
+            ->retry(
+                self::RETRIES,
+                fn (int $attempt, Throwable $exception): int => $this->retryDelayMilliseconds($exception),
+                fn (Throwable $exception): bool => $this->shouldRetry($exception),
+                throw: false,
+            );
+    }
+
+    /**
+     * Forge throttles its API (about 60 requests a minute), and a full sync
+     * makes two writes per domain — a few dozen domains in, every request
+     * comes back 429 "Too many attempts". Waiting out the window and carrying
+     * on is the only way a sync of every site gets to the end.
+     */
+    private function shouldRetry(Throwable $exception): bool
+    {
+        if ($exception instanceof ConnectionException) {
+            return true;
+        }
+
+        if (! $exception instanceof RequestException) {
+            return false;
+        }
+
+        return $exception->response->status() === 429 || $exception->response->serverError();
+    }
+
+    /**
+     * How long Forge asked us to wait (Retry-After), or a full throttle
+     * window when it doesn't say; a short pause for anything else.
+     */
+    private function retryDelayMilliseconds(Throwable $exception): int
+    {
+        if (! $exception instanceof RequestException || $exception->response->status() !== 429) {
+            return 200;
+        }
+
+        $retryAfter = (int) $exception->response->header('Retry-After');
+        $seconds = $retryAfter > 0 ? min($retryAfter, self::MAX_RETRY_AFTER_SECONDS) : self::DEFAULT_RETRY_AFTER_SECONDS;
+
+        return ($seconds + 1) * 1000;
     }
 
     private function domainsEndpoint(): string
