@@ -126,4 +126,58 @@ return [
         'c2c' => 'C2C',
     ],
 
+    /**
+     * Words people reach for when naming a site's category that aren't
+     * Chaturbate tags, mapped to the nearest tag that is — so "ass" lands on
+     * 'bigass' instead of filtering a homepage down to nothing.
+     *
+     * Null means there is no honest equivalent ("general", "video", "dating"),
+     * and the site is better off with no default category at all: its tags
+     * still define the niche, the visitor just isn't narrowed further.
+     *
+     * Applied by Site::normalizeCategory() wherever a category comes in from
+     * outside the panel's own dropdown (CSV import, the admin MCP server).
+     */
+    'category_aliases' => [
+        'amateur' => 'new',
+        'ass' => 'bigass',
+        'booty' => 'bigass',
+        'cock' => 'bigcock',
+        'dick' => 'bigdick',
+        'tits' => 'bigboobs',
+        'boobs' => 'bigboobs',
+        'pussy' => 'squirt',
+        'college' => 'young',
+        'coed' => 'young',
+        'teens' => 'teen',
+        'fetish' => 'bdsm',
+        'spank' => 'bdsm',
+        'kink' => 'bdsm',
+        'oral' => 'deepthroat',
+        'blowjob' => 'deepthroat',
+        'chat' => 'c2c',
+        'roleplay' => 'cosplay',
+        'lingerie' => 'stockings',
+        'sugar' => 'daddysgirl',
+        'escort' => 'slut',
+        'brothel' => 'slut',
+        'russian' => 'ukraine',
+        'foot' => 'feet',
+        'shop' => 'lovense',
+        'toys' => 'lovense',
+        'trans' => null,
+        'voyeur' => null,
+        'general' => null,
+        'video' => null,
+        'camgirl' => null,
+        'euro' => null,
+        'strip' => null,
+        'celeb' => null,
+        'travel' => null,
+        'dating' => null,
+        'freecam' => null,
+        'games' => null,
+        'mobile' => null,
+    ],
+
 ];

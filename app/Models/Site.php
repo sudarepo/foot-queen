@@ -292,6 +292,33 @@ class Site extends Model
     }
 
     /**
+     * The Chaturbate tag a free-text category means, or null when it has none.
+     *
+     * Categories filter on tags rooms actually carry, so anything outside the
+     * featured list ("general", "amateur") silently empties the homepage.
+     * Off-list words go through `cam-taxonomy.category_aliases` to their
+     * nearest real tag; whatever still isn't on the list is dropped.
+     */
+    public static function normalizeCategory(?string $category): ?string
+    {
+        $category = Str::lower(trim((string) $category));
+
+        if ($category === '') {
+            return null;
+        }
+
+        $aliases = config('cam-taxonomy.category_aliases', []);
+
+        if (array_key_exists($category, $aliases)) {
+            $category = $aliases[$category];
+        }
+
+        return in_array($category, config('cam-taxonomy.featured_categories', []), strict: true)
+            ? $category
+            : null;
+    }
+
+    /**
      * How one category slug is written for visitors.
      *
      * Slugs are raw provider tags, so most of them read fine with a capital
