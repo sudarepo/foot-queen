@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
@@ -48,6 +49,17 @@ class User extends Authenticatable implements FilamentUser
     public function sites(): BelongsToMany
     {
         return $this->belongsToMany(Site::class);
+    }
+
+    /**
+     * Bearer tokens for the admin MCP server. Only honoured while the user
+     * is an admin — see App\Http\Middleware\AuthenticateMcpToken.
+     *
+     * @return HasMany<McpToken, $this>
+     */
+    public function mcpTokens(): HasMany
+    {
+        return $this->hasMany(McpToken::class);
     }
 
     public function isAdmin(): bool
