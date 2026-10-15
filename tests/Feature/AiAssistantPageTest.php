@@ -14,7 +14,8 @@ use Tests\TestCase;
 /**
  * The panel page that hands out MCP keys (App\Filament\Pages\AiAssistant) —
  * built for someone who will never open a terminal, so the key and every
- * snippet it goes into have to come out of the page ready to paste.
+ * snippet it goes into have to come out of the page ready to paste, and stay
+ * there for the next time they set up a computer.
  */
 class AiAssistantPageTest extends TestCase
 {
@@ -46,14 +47,15 @@ class AiAssistantPageTest extends TestCase
             ->callAction('createKey', data: ['name' => 'Claude on my laptop', 'expires' => '90'])
             ->assertHasNoActionErrors();
 
-        $plaintext = $page->get('newKey');
         $token = $admin->mcpTokens()->sole();
+        $plaintext = $token->secret;
 
         $this->assertSame('Claude on my laptop', $token->name);
         $this->assertSame(McpToken::hash($plaintext), $token->getRawOriginal('token'));
         $this->assertEqualsWithDelta(now()->addDays(90)->timestamp, $token->expires_at->timestamp, 5);
 
         $page
+            ->assertSet('keyId', $token->id)
             ->assertSee('"AUTH_HEADER": "Bearer '.$plaintext.'"')
             ->assertSee('mcp-remote')
             ->assertSee(url('/mcp/admin'))
@@ -61,42 +63,94 @@ class AiAssistantPageTest extends TestCase
     }
 
     /**
-     * The key is only stored hashed; once the page is left it's gone, and a
-     * fresh visit must not show it (or anything that looks like it).
+     * The whole point of keeping an encrypted copy: closing the tab before
+     * finishing setup, or setting up a second computer next week, must not
+     * mean starting over.
      */
-    public function test_the_key_is_not_shown_again_on_a_fresh_visit(): void
+    public function test_the_setup_steps_are_still_there_on_a_later_visit(): void
     {
-        $this->actingAs(User::factory()->create());
+        $admin = User::factory()->create();
+        [, $plaintext] = McpToken::issue($admin, 'Laptop');
+
+        $this->actingAs($admin)
+            ->get('/admin/ai-assistant')
+            ->assertSuccessful()
+            ->assertSee('Setting up Claude with your key')
+            ->assertSee($plaintext);
+    }
+
+    public function test_the_key_is_stored_encrypted_not_in_plain_text(): void
+    {
+        [$token, $plaintext] = McpToken::issue(User::factory()->create(), 'Laptop');
+
+        $this->assertNotSame($plaintext, $token->getRawOriginal('secret'));
+        $this->assertSame($plaintext, $token->refresh()->secret);
+        $this->assertArrayNotHasKey('secret', $token->toArray());
+    }
+
+    public function test_setup_steps_can_be_shown_for_an_older_key(): void
+    {
+        $admin = User::factory()->create();
+        [$older, $olderPlaintext] = McpToken::issue($admin, 'Old laptop');
+        McpToken::issue($admin, 'New laptop');
+        $this->actingAs($admin);
 
         Livewire::test(AiAssistant::class)
-            ->callAction('createKey', data: ['name' => 'Claude', 'expires' => 'never']);
+            ->assertSee('New laptop')
+            ->callAction(TestAction::make('showSetup')->table($older))
+            ->assertSet('keyId', $older->id)
+            ->assertSee('"AUTH_HEADER": "Bearer '.$olderPlaintext.'"');
+    }
 
-        $this->get('/admin/ai-assistant')
+    public function test_an_admin_only_sees_their_own_keys(): void
+    {
+        $admin = User::factory()->create();
+        [$mine] = McpToken::issue($admin, 'Mine');
+        [$theirs, $theirPlaintext] = McpToken::issue(User::factory()->create(), 'Someone elses');
+        $this->actingAs($admin);
+
+        Livewire::test(AiAssistant::class)
+            ->assertCanSeeTableRecords([$mine])
+            ->assertCanNotSeeTableRecords([$theirs])
+            ->assertDontSee($theirPlaintext);
+    }
+
+    /**
+     * The selected key travels in the URL (?key=…), so it's the one input an
+     * admin could tamper with to reach someone else's key.
+     */
+    public function test_another_admins_key_cannot_be_opened_through_the_url(): void
+    {
+        $admin = User::factory()->create();
+        [$theirs, $theirPlaintext] = McpToken::issue(User::factory()->create(), 'Someone elses');
+
+        $this->actingAs($admin)
+            ->get('/admin/ai-assistant?key='.$theirs->id)
             ->assertSuccessful()
-            ->assertSee('What this does')
-            ->assertDontSee(McpToken::PREFIX);
+            ->assertDontSee($theirPlaintext)
+            ->assertDontSee('Setting up Claude with your key');
     }
 
     public function test_a_key_created_on_the_page_works_against_the_server(): void
     {
-        $this->actingAs(User::factory()->create());
+        $admin = User::factory()->create();
+        $this->actingAs($admin);
 
-        $plaintext = Livewire::test(AiAssistant::class)
-            ->callAction('createKey', data: ['name' => 'Claude', 'expires' => 'never'])
-            ->get('newKey');
+        Livewire::test(AiAssistant::class)
+            ->callAction('createKey', data: ['name' => 'Claude', 'expires' => 'never']);
 
-        $this->withToken($plaintext)
+        $this->withToken($admin->mcpTokens()->sole()->secret)
             ->postJson('/mcp/admin', ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list', 'params' => []])
             ->assertOk();
     }
 
     public function test_a_key_can_be_revoked_from_the_table(): void
     {
-        $this->actingAs(User::factory()->create());
-        [$token] = McpToken::issue(User::factory()->create(), 'Old laptop');
+        $admin = User::factory()->create();
+        [$token] = McpToken::issue($admin, 'Old laptop');
+        $this->actingAs($admin);
 
         Livewire::test(AiAssistant::class)
-            ->assertCanSeeTableRecords([$token])
             ->callAction(TestAction::make('revoke')->table($token));
 
         $this->assertModelMissing($token);
