@@ -105,6 +105,7 @@ class SiteCsvImportCommandTest extends TestCase
         $this->assertSame('grid', $site->home_layout_mobile->value);
         $this->assertSame('foot-queen', $site->seo_pages);
         $this->assertSame('G-TEST123456', $site->ga_measurement_id);
+        $this->assertNull($site->default_category, '"voyeur" has no Chaturbate tag, so it must not be stored.');
 
         $this->assertSame($initialCount + 2, Site::query()->count('*'));
     }

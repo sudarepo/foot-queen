@@ -178,7 +178,7 @@ class ImportSitesFromCsv extends Command
             'home_layout_mobile' => $this->parseHomepageLayout((string) Arr::get($data, 'mobile visitors'))->value,
             'gender' => $this->parseGender((string) Arr::get($data, 'gender')),
             'tags' => $tags,
-            'default_category' => $this->nullableTrim((string) Arr::get($data, 'default category')),
+            'default_category' => Site::normalizeCategory((string) Arr::get($data, 'default category')),
             'home_h1' => $this->nullableTrim((string) Arr::get($data, 'homepage_heading')),
             'home_title' => $this->nullableTrim((string) Arr::get($data, 'homepage <title>')),
             'tagline' => $this->nullableTrim((string) Arr::get($data, 'tagline')),

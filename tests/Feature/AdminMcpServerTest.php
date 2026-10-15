@@ -174,6 +174,36 @@ class AdminMcpServerTest extends TestCase
             ->assertHasErrors();
     }
 
+    /**
+     * A category that isn't a Chaturbate tag filters every cam off the
+     * homepage, so the server refuses it rather than storing it.
+     */
+    public function test_update_site_rejects_a_category_that_is_not_a_chaturbate_tag(): void
+    {
+        $site = Site::factory()->create(['default_category' => 'feet']);
+
+        AdminServer::actingAs(User::factory()->create())
+            ->tool(UpdateSite::class, ['site' => $site->id, 'default_category' => 'general'])
+            ->assertHasErrors();
+
+        AdminServer::actingAs(User::factory()->create())
+            ->tool(UpdateSite::class, ['site' => $site->id, 'featured_categories' => ['feet', 'amateur']])
+            ->assertHasErrors();
+
+        $this->assertSame('feet', $site->refresh()->default_category);
+    }
+
+    public function test_update_site_accepts_a_chaturbate_tag_as_the_category(): void
+    {
+        $site = Site::factory()->create();
+
+        AdminServer::actingAs(User::factory()->create())
+            ->tool(UpdateSite::class, ['site' => $site->id, 'default_category' => 'bigass'])
+            ->assertOk();
+
+        $this->assertSame('bigass', $site->refresh()->default_category);
+    }
+
     public function test_legal_page_overrides_merge_per_page_and_blank_text_restores_the_default(): void
     {
         $site = Site::factory()->create(['legal_pages' => [

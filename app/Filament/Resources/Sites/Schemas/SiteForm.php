@@ -29,6 +29,7 @@ use Filament\Schemas\Schema;
 use Filament\Support\Enums\TextSize;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
 /**
  * Everything that makes one domain look and behave like its own website.
@@ -306,7 +307,9 @@ class SiteForm
                 TagsInput::make('featured_categories')
                     ->label('Category dropdown options')
                     ->placeholder('Leave empty for the shared default list')
-                    ->helperText('Overrides config/cam-taxonomy.php featured_categories for this site only.')
+                    ->helperText('Overrides config/cam-taxonomy.php featured_categories for this site only. Chaturbate tags only — anything else matches no cams.')
+                    ->suggestions(config('cam-taxonomy.featured_categories', []))
+                    ->nestedRecursiveRules([Rule::in(config('cam-taxonomy.featured_categories', []))])
                     ->live()
                     ->columnSpanFull(),
 
@@ -324,7 +327,9 @@ class SiteForm
      *
      * A value saved before that list was narrowed is kept as an option, so a
      * form opened on such a site shows what it is set to instead of appearing
-     * blank and clearing the setting on the next save.
+     * blank and clearing the setting on the next save — but only while it is
+     * still a real Chaturbate tag. One that isn't empties the homepage, so it
+     * is better cleared than preserved.
      *
      * @return array<string, string>
      */
@@ -335,7 +340,7 @@ class SiteForm
             : config('cam-taxonomy.featured_categories', []);
 
         return collect($categories)
-            ->push($get('default_category'))
+            ->push(Site::normalizeCategory($get('default_category')) === $get('default_category') ? $get('default_category') : null)
             ->filter()
             ->unique()
             ->mapWithKeys(fn (string $category) => [$category => Site::categoryLabel($category)])

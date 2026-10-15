@@ -276,6 +276,20 @@ class MultiSiteTest extends TestCase
             ->assertDontSee('site.webmanifest', false);
     }
 
+    public function test_foot_queen_shares_with_its_own_og_image(): void
+    {
+        $this->get($this->defaultHost('/feed'))
+            ->assertSee('<meta property="og:image" content="'.asset('storage/sites/og/foot-queen.png').'">', false);
+    }
+
+    public function test_a_site_without_an_og_image_falls_back_to_the_generic_one_in_public(): void
+    {
+        $this->bbwSite();
+
+        $this->get('http://bbwcams.test/feed')
+            ->assertSee('<meta property="og:image" content="http://bbwcams.test/og-image.png">', false);
+    }
+
     /* ----------  Attribution  ---------- */
 
     public function test_outbound_clicks_carry_the_sites_track_prefix(): void

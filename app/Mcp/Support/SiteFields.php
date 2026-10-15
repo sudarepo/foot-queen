@@ -33,6 +33,17 @@ class SiteFields
     ];
 
     /**
+     * Every category a site may use: the Chaturbate tags in the shared
+     * taxonomy. Anything else matches no room and empties the homepage.
+     *
+     * @return array<int, string>
+     */
+    public static function categories(): array
+    {
+        return config('cam-taxonomy.featured_categories', []);
+    }
+
+    /**
      * @return array<string, Type>
      */
     public static function schema(JsonSchema $schema): array
@@ -54,8 +65,8 @@ class SiteFields
             ]))->description('Header navigation links. Replaces the whole list.'),
             'gender' => $schema->string()->enum([...self::GENDERS, null])->nullable()->description('Restrict the site to one gender; null for any.'),
             'tags' => $strings('Provider tags that define the site\'s niche — the hard boundary of what it shows and what the sync fetches. Empty = everything matching gender.'),
-            'featured_categories' => $strings('Category dropdown options; empty for the shared default list.'),
-            'default_category' => $string('Pre-selected category on the homepage and feed; null for all.'),
+            'featured_categories' => $schema->array()->items($schema->string()->enum(self::categories()))->description('Category dropdown options, each a Chaturbate tag from the shared list; empty for the whole list.'),
+            'default_category' => $schema->string()->enum([...self::categories(), null])->nullable()->description('Pre-selected category on the homepage and feed — must be a Chaturbate tag, or every cam is filtered out. Null for all (the right choice when no tag fits).'),
             'home_h1' => $string('Homepage H1 (max 160). Falls back to the site name.'),
             'home_title' => $string('Homepage <title> (max 200). Falls back to the site name.'),
             'tagline' => $string('Tagline (max 320).'),
@@ -106,8 +117,8 @@ class SiteFields
             'tags' => ['sometimes', 'array'],
             'tags.*' => ['string', 'max:64'],
             'featured_categories' => ['sometimes', 'array'],
-            'featured_categories.*' => ['string', 'max:64'],
-            'default_category' => ['sometimes', 'nullable', 'string', 'max:64'],
+            'featured_categories.*' => ['string', Rule::in(self::categories())],
+            'default_category' => ['sometimes', 'nullable', 'string', Rule::in(self::categories())],
             'home_h1' => ['sometimes', 'nullable', 'string', 'max:160'],
             'home_title' => ['sometimes', 'nullable', 'string', 'max:200'],
             'tagline' => ['sometimes', 'nullable', 'string', 'max:320'],

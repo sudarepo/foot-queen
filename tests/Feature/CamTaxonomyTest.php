@@ -46,6 +46,30 @@ class CamTaxonomyTest extends TestCase
         }
     }
 
+    public function test_every_category_alias_points_at_a_featured_category_or_nothing(): void
+    {
+        $featured = config('cam-taxonomy.featured_categories');
+
+        foreach (config('cam-taxonomy.category_aliases') as $alias => $category) {
+            $this->assertNotContains((string) $alias, $featured, "'{$alias}' is already a real tag; aliasing it would hide it.");
+
+            if ($category !== null) {
+                $this->assertContains($category, $featured, "Alias '{$alias}' points at '{$category}', which isn't a featured category.");
+            }
+        }
+    }
+
+    public function test_a_category_is_normalized_to_its_chaturbate_tag(): void
+    {
+        $this->assertSame('feet', Site::normalizeCategory(' Feet '));
+        $this->assertSame('bigass', Site::normalizeCategory('ass'));
+        $this->assertSame('new', Site::normalizeCategory('Amateur'));
+        $this->assertNull(Site::normalizeCategory('general'));
+        $this->assertNull(Site::normalizeCategory('not-a-tag-at-all'));
+        $this->assertNull(Site::normalizeCategory(''));
+        $this->assertNull(Site::normalizeCategory(null));
+    }
+
     public function test_a_newly_added_category_is_picked_up_from_a_rooms_tags(): void
     {
         config([
