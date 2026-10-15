@@ -55,7 +55,6 @@ class AiAssistantPageTest extends TestCase
         $this->assertEqualsWithDelta(now()->addDays(90)->timestamp, $token->expires_at->timestamp, 5);
 
         $page
-            ->assertSet('keyId', $token->id)
             ->assertSee('"AUTH_HEADER": "Bearer '.$plaintext.'"')
             ->assertSee('mcp-remote')
             ->assertSee(url('/mcp/admin'))
@@ -88,7 +87,11 @@ class AiAssistantPageTest extends TestCase
         $this->assertArrayNotHasKey('secret', $token->toArray());
     }
 
-    public function test_setup_steps_can_be_shown_for_an_older_key(): void
+    /**
+     * "Setup steps" opens a slide-over rather than changing the page above
+     * the table — a change out of view looked like the button did nothing.
+     */
+    public function test_setup_steps_open_in_a_slide_over_for_an_older_key(): void
     {
         $admin = User::factory()->create();
         [$older, $olderPlaintext] = McpToken::issue($admin, 'Old laptop');
@@ -96,10 +99,23 @@ class AiAssistantPageTest extends TestCase
         $this->actingAs($admin);
 
         Livewire::test(AiAssistant::class)
-            ->assertSee('New laptop')
-            ->callAction(TestAction::make('showSetup')->table($older))
-            ->assertSet('keyId', $older->id)
-            ->assertSee('"AUTH_HEADER": "Bearer '.$olderPlaintext.'"');
+            ->assertDontSee($olderPlaintext)
+            ->mountAction(TestAction::make('showSetup')->table($older))
+            ->assertMountedActionModalSee('Setup steps for "Old laptop"')
+            ->assertMountedActionModalSee('"AUTH_HEADER": "Bearer '.$olderPlaintext.'"');
+    }
+
+    public function test_the_page_shows_the_newest_key_after_creating_one(): void
+    {
+        $admin = User::factory()->create();
+        [, $olderPlaintext] = McpToken::issue($admin, 'Old laptop');
+        $this->actingAs($admin);
+
+        Livewire::test(AiAssistant::class)
+            ->callAction('createKey', data: ['name' => 'Second computer', 'expires' => 'never'])
+            ->assertSee('Setting up Claude with your key &quot;Second computer&quot;', escape: false)
+            ->assertSee($admin->mcpTokens()->latest('id')->first()->secret)
+            ->assertDontSee($olderPlaintext);
     }
 
     public function test_an_admin_only_sees_their_own_keys(): void
@@ -115,17 +131,12 @@ class AiAssistantPageTest extends TestCase
             ->assertDontSee($theirPlaintext);
     }
 
-    /**
-     * The selected key travels in the URL (?key=…), so it's the one input an
-     * admin could tamper with to reach someone else's key.
-     */
-    public function test_another_admins_key_cannot_be_opened_through_the_url(): void
+    public function test_an_admin_without_keys_never_sees_another_admins_setup(): void
     {
-        $admin = User::factory()->create();
-        [$theirs, $theirPlaintext] = McpToken::issue(User::factory()->create(), 'Someone elses');
+        [, $theirPlaintext] = McpToken::issue(User::factory()->create(), 'Someone elses');
 
-        $this->actingAs($admin)
-            ->get('/admin/ai-assistant?key='.$theirs->id)
+        $this->actingAs(User::factory()->create())
+            ->get('/admin/ai-assistant')
             ->assertSuccessful()
             ->assertDontSee($theirPlaintext)
             ->assertDontSee('Setting up Claude with your key');
