@@ -89,8 +89,11 @@ class ChaturbateProvider implements CamProviderInterface
             $gender = filled($site->gender) ? ($genderCodes[$site->gender] ?? null) : null;
 
             // A site with no tags is defined by gender alone, which is still
-            // a valid search — one request with no `tag` param.
-            $tags = $site->tags ?: [null];
+            // a valid search — one request with no `tag` param. Tags are
+            // normalized on save; doing it again here keeps a row written
+            // around the model (a raw query, an old import) from costing a
+            // request the API is guaranteed to reject.
+            $tags = Site::normalizeTags($site->tags ?? []) ?: [null];
 
             foreach ($tags as $tag) {
                 $targets[$gender.'|'.$tag] = ['gender' => $gender, 'tag' => $tag];

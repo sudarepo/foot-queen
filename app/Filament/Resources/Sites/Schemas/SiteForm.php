@@ -301,7 +301,7 @@ class SiteForm
                 TagsInput::make('tags')
                     ->label('Keywords / tags')
                     ->placeholder('feet')
-                    ->helperText('The heart of the site. These are the provider tags the sync searches for, and the hard boundary of what this domain shows — no filter in the UI can escape them. Leave empty to show everything matching the gender above.')
+                    ->helperText('The heart of the site. These are the provider tags the sync searches for, and the hard boundary of what this domain shows — no filter in the UI can escape them. Leave empty to show everything matching the gender above. Saved the way Chaturbate spells tags — one lowercase word, so "Big Cock" becomes bigcock.')
                     ->columnSpanFull(),
 
                 TagsInput::make('featured_categories')

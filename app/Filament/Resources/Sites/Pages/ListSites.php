@@ -6,6 +6,7 @@ use App\Filament\Resources\Sites\ForgeSyncNotification;
 use App\Filament\Resources\Sites\SiteResource;
 use App\Models\Site;
 use App\Services\Forge\ForgeDomainProvisioner;
+use App\Services\Forge\ForgeSyncInProgress;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Forms\Components\FileUpload;
@@ -152,6 +153,14 @@ class ListSites extends ListRecords
 
         try {
             $result = $provisioner->sync($sites, requestCertificates: $requestCertificates, dryRun: $dryRun);
+        } catch (ForgeSyncInProgress $exception) {
+            Notification::make()
+                ->title('Forge sync already running')
+                ->body(e($exception->getMessage()))
+                ->warning()
+                ->send();
+
+            return;
         } catch (Throwable $exception) {
             report($exception);
 

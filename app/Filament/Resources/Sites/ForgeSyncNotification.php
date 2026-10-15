@@ -16,7 +16,7 @@ class ForgeSyncNotification
     private const MAX_LISTED_DOMAINS = 8;
 
     /**
-     * @param  array{failures:int, operations:array<int, array{domain:string, action:string, status:string, error:?string}>}  $result
+     * @param  array{failures:int, skipped_recent_failure?:int, operations:array<int, array{domain:string, action:string, status:string, error:?string}>}  $result
      */
     public static function make(array $result, bool $dryRun): Notification
     {
@@ -34,6 +34,7 @@ class ForgeSyncNotification
                 $dryRun ? 'Would request SSL for :count' : 'Requested SSL for :count',
             ),
             self::failureSection($failed),
+            self::recentFailureSection($result['skipped_recent_failure'] ?? 0),
         ])->filter();
 
         $notification = Notification::make()
@@ -49,6 +50,20 @@ class ForgeSyncNotification
         }
 
         return $dryRun && $operations->isNotEmpty() ? $notification->info() : $notification->success();
+    }
+
+    /**
+     * Certificates that failed within the last hour aren't re-requested by a
+     * bulk sync — each attempt reloads the web server, and a failure is
+     * usually DNS that a retry won't fix.
+     */
+    private static function recentFailureSection(int $count): ?string
+    {
+        if ($count === 0) {
+            return null;
+        }
+
+        return '<strong>Skipped SSL for '.$count.' '.Str::plural('domain', $count).'</strong> that failed in the last hour. Use Retry SSL on the site once its DNS points at this server.';
     }
 
     private static function title(bool $nothingChanged, int $failureCount, bool $dryRun): string

@@ -66,12 +66,17 @@ class SyncForgeDomains extends Command
                 requestCertificates: $requestCertificates,
                 dryRun: $dryRun,
                 requestDomains: $requestDomains,
+                retryRecentFailures: $certificatesOnly && $sites->count() === 1,
             );
         } catch (\Throwable $exception) {
             report($exception);
             $this->error($exception->getMessage());
 
             return self::FAILURE;
+        }
+
+        if ($result['skipped_recent_failure'] > 0) {
+            $this->warn("Skipped {$result['skipped_recent_failure']} certificate(s) that failed in the last hour; retry a single site with --site and --certificates-only once its DNS points here.");
         }
 
         if ($result['operations'] === []) {

@@ -57,6 +57,19 @@ class Site extends Model
 
     protected static function booted(): void
     {
+        /**
+         * Tags are matched verbatim against Chaturbate's, which are single
+         * lowercase words — so "Big Cock" has to be stored as 'bigcock', or
+         * the sync's API call is rejected and the niche matches no one.
+         * Normalized here so the panel, the MCP server and the CSV import
+         * can't disagree about it.
+         */
+        static::saving(function (Site $site) {
+            if ($site->isDirty('tags') && is_array($site->tags)) {
+                $site->tags = static::normalizeTags($site->tags);
+            }
+        });
+
         static::saved(function (Site $site) {
             /**
              * "Default" is the fallback for unmatched hosts, so two of them
@@ -289,6 +302,30 @@ class Site extends Model
         return filled($this->featured_categories)
             ? $this->featured_categories
             : config('cam-taxonomy.featured_categories', []);
+    }
+
+    /**
+     * A tag in the form Chaturbate accepts: lowercase letters, digits and
+     * underscores, nothing else ("Foot Fetish" → 'footfetish', "18+" → '18').
+     * Empty when nothing usable is left.
+     */
+    public static function normalizeTag(?string $tag): string
+    {
+        return (string) preg_replace('/[^a-z0-9_]/', '', Str::lower((string) $tag));
+    }
+
+    /**
+     * @param  array<int, mixed>  $tags
+     * @return array<int, string>
+     */
+    public static function normalizeTags(array $tags): array
+    {
+        return collect($tags)
+            ->map(fn (mixed $tag): string => static::normalizeTag(is_string($tag) ? $tag : null))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /**

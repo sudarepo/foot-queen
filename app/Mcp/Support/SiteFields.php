@@ -64,7 +64,7 @@ class SiteFields
                 'url' => $schema->string()->required(),
             ]))->description('Header navigation links. Replaces the whole list.'),
             'gender' => $schema->string()->enum([...self::GENDERS, null])->nullable()->description('Restrict the site to one gender; null for any.'),
-            'tags' => $strings('Provider tags that define the site\'s niche — the hard boundary of what it shows and what the sync fetches. Empty = everything matching gender.'),
+            'tags' => $strings('Chaturbate tags that define the site\'s niche — the hard boundary of what it shows and what the sync fetches. Single lowercase words as rooms use them (bigcock, footfetish); anything else is stored lowercased with spaces and punctuation removed. Empty = everything matching gender.'),
             'featured_categories' => $schema->array()->items($schema->string()->enum(self::categories()))->description('Category dropdown options, each a Chaturbate tag from the shared list; empty for the whole list.'),
             'default_category' => $schema->string()->enum([...self::categories(), null])->nullable()->description('Pre-selected category on the homepage and feed — must be a Chaturbate tag, or every cam is filtered out. Null for all (the right choice when no tag fits).'),
             'home_h1' => $string('Homepage H1 (max 160). Falls back to the site name.'),

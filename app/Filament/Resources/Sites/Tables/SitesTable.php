@@ -45,16 +45,6 @@ class SitesTable
 
     private const FORGE_SSL_STATUS_NO_DOMAIN = 'No domain';
 
-    /**
-     * @var array{configured: bool, available: bool, domains: array<int, string>}|null
-     */
-    private static ?array $forgeDomainState = null;
-
-    /**
-     * @var array{configured: bool, available: bool, certificates: array<int, string>}|null
-     */
-    private static ?array $forgeCertificateState = null;
-
     public static function configure(Table $table): Table
     {
         return $table
@@ -203,15 +193,21 @@ class SitesTable
      */
     private static function forgeDomainState(): array
     {
-        if (self::$forgeDomainState !== null) {
-            return self::$forgeDomainState;
-        }
+        // Once per request, not once per process: a static would outlive the
+        // request in a long-running worker and between tests.
+        return once(fn (): array => self::fetchForgeDomainState());
+    }
 
+    /**
+     * @return array{configured: bool, available: bool, domains: array<int, string>}
+     */
+    private static function fetchForgeDomainState(): array
+    {
         /** @var ForgeDomainProvisioner $provisioner */
         $provisioner = app(ForgeDomainProvisioner::class);
 
         if (! $provisioner->isConfigured()) {
-            return self::$forgeDomainState = [
+            return [
                 'configured' => false,
                 'available' => false,
                 'domains' => [],
@@ -219,13 +215,13 @@ class SitesTable
         }
 
         try {
-            return self::$forgeDomainState = [
+            return [
                 'configured' => true,
                 'available' => true,
                 'domains' => $provisioner->existingDomains()->all(),
             ];
         } catch (Throwable) {
-            return self::$forgeDomainState = [
+            return [
                 'configured' => true,
                 'available' => false,
                 'domains' => [],
@@ -238,15 +234,19 @@ class SitesTable
      */
     private static function forgeCertificateState(): array
     {
-        if (self::$forgeCertificateState !== null) {
-            return self::$forgeCertificateState;
-        }
+        return once(fn (): array => self::fetchForgeCertificateState());
+    }
 
+    /**
+     * @return array{configured: bool, available: bool, certificates: array<int, string>}
+     */
+    private static function fetchForgeCertificateState(): array
+    {
         /** @var ForgeDomainProvisioner $provisioner */
         $provisioner = app(ForgeDomainProvisioner::class);
 
         if (! $provisioner->isConfigured()) {
-            return self::$forgeCertificateState = [
+            return [
                 'configured' => false,
                 'available' => false,
                 'certificates' => [],
@@ -254,13 +254,13 @@ class SitesTable
         }
 
         try {
-            return self::$forgeCertificateState = [
+            return [
                 'configured' => true,
                 'available' => true,
                 'certificates' => $provisioner->existingCertificates()->all(),
             ];
         } catch (Throwable) {
-            return self::$forgeCertificateState = [
+            return [
                 'configured' => true,
                 'available' => false,
                 'certificates' => [],
