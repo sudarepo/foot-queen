@@ -17,9 +17,17 @@ use Illuminate\Support\Str;
  * The token authenticates *as* its user, but grants nothing on its own: the
  * middleware re-checks `is_admin` on every request, so demoting someone in
  * the panel cuts off their tokens without having to find and revoke them.
+ *
+ * Stored twice: hashed in `token`, which is what requests are matched
+ * against, and encrypted with APP_KEY in `secret`, so the owner can reopen
+ * the AI Assistant page and copy their setup again instead of having to mint
+ * a new key every time they set up Claude. That's a deliberate trade for a
+ * non-technical admin; it means a database dump *together with* APP_KEY
+ * exposes keys — but APP_KEY alone already forges sessions, so it's guarded
+ * as carefully either way.
  */
-#[Fillable(['user_id', 'name', 'token', 'last_used_at', 'expires_at'])]
-#[Hidden(['token'])]
+#[Fillable(['user_id', 'name', 'token', 'secret', 'last_used_at', 'expires_at'])]
+#[Hidden(['token', 'secret'])]
 class McpToken extends Model
 {
     /** @use HasFactory<McpTokenFactory> */
@@ -36,6 +44,7 @@ class McpToken extends Model
         return [
             'last_used_at' => 'datetime',
             'expires_at' => 'datetime',
+            'secret' => 'encrypted',
         ];
     }
 
@@ -48,8 +57,7 @@ class McpToken extends Model
     }
 
     /**
-     * Mint a token for a user, returning the stored record and the plaintext
-     * — which is never recoverable afterwards.
+     * Mint a token for a user, returning the stored record and the plaintext.
      *
      * @return array{0: self, 1: string}
      */
@@ -61,6 +69,7 @@ class McpToken extends Model
             'user_id' => $user->getKey(),
             'name' => $name,
             'token' => static::hash($plaintext),
+            'secret' => $plaintext,
             'expires_at' => $expiresAt,
         ]);
 

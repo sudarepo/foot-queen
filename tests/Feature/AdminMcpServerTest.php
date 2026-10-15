@@ -451,7 +451,7 @@ class AdminMcpServerTest extends TestCase
         $admin = User::factory()->create(['email' => 'boss@example.com']);
 
         $this->artisan('mcp:issue-token', ['email' => 'boss@example.com', '--name' => 'Claude', '--expires' => 30])
-            ->expectsOutputToContain('Copy it now')
+            ->expectsOutputToContain('AI Assistant page')
             ->assertSuccessful();
 
         $token = $admin->mcpTokens()->sole();

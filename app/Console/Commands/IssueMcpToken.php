@@ -49,7 +49,7 @@ class IssueMcpToken extends Command
         $this->newLine();
         $this->line($plaintext);
         $this->newLine();
-        $this->warn('Copy it now — it is stored hashed and cannot be shown again.');
+        $this->line('It is also shown, with setup steps, on the AI Assistant page in the admin when signed in as '.$user->email.'.');
         $this->line('Server URL: '.url('/mcp/admin'));
 
         return self::SUCCESS;

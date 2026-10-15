@@ -4,7 +4,7 @@ The app exposes an [MCP](https://modelcontextprotocol.io) server at **`/mcp/admi
 
 - **Admins only.** Every request needs a bearer token. The server checks on every call that the token's owner is still an admin, so demoting someone in the panel cuts their tokens off immediately.
 - **The same on every domain.** `https://ebony18.com/mcp/admin` and `https://freecam.xxx/mcp/admin` reach the same server with the same data. Use whichever domain you like, but always over **https**.
-- Defined in `routes/ai.php` and `app/Mcp/`. Tokens are stored hashed in `mcp_tokens`.
+- Defined in `routes/ai.php` and `app/Mcp/`. Tokens are stored in `mcp_tokens` twice: hashed, for checking requests, and encrypted with `APP_KEY`, so the owner can see their setup again.
 
 ## 1. Issue a token
 
@@ -14,7 +14,7 @@ The app exposes an [MCP](https://modelcontextprotocol.io) server at **`/mcp/admi
 - starter messages to paste into Claude.
 - copy-ready versions for developers: the key on its own, the server address and the Claude Code command.
 
-The key is only shown until you leave the page. The same page lists every key with a **Revoke** button.
+The steps stay on the page: come back any time to set up another computer. Each admin sees **only their own keys**, each with **Setup steps** and **Revoke** buttons.
 
 Each person and each client should get its own token, so you can revoke one without affecting the others.
 
@@ -24,7 +24,7 @@ Each person and each client should get its own token, so you can revoke one with
 php artisan mcp:issue-token you@example.com --name="Claude Code – laptop" --expires=90
 ```
 
-The token (`fqmcp_…`) is printed **once**. It can't be retrieved later, so if you lose it, issue a new one. Leave out `--expires` for a token that never expires.
+The token (`fqmcp_…`) is printed in the terminal. It also appears with its setup steps on the AI Assistant page for the user it belongs to. Leave out `--expires` for a token that never expires.
 
 On production, SSH in and use `php8.4`, because the server's default `php` is 8.1:
 
