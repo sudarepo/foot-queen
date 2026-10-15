@@ -5,7 +5,10 @@ namespace App\Services\Forge;
 use App\Models\Site;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 
@@ -25,6 +28,24 @@ class ForgeDomainProvisioner
 
     public const STATUS_FAILED = 'failed';
 
+    /**
+     * Held for the whole of a live sync. Every certificate Forge installs
+     * reloads nginx and PHP-FPM, so two syncs racing each other — a double
+     * click, the panel and the MCP server at once — double the reloads and
+     * take every site on the server down with them.
+     */
+    private const LOCK_KEY = 'forge-domain-sync';
+
+    /** Long enough for a full sync of every site; released as soon as it ends. */
+    private const LOCK_SECONDS = 900;
+
+    /**
+     * A failed certificate is usually DNS that doesn't point here yet, which
+     * an immediate retry won't fix — it only costs another reload. Bulk syncs
+     * leave a fresh failure alone for this long.
+     */
+    private const FAILED_CERTIFICATE_RETRY_AFTER_MINUTES = 60;
+
     public function isConfigured(): bool
     {
         return filled($this->token())
@@ -37,19 +58,65 @@ class ForgeDomainProvisioner
      * reported in `operations`; domains and certificates already in Forge are
      * counted in the `skipped_*` totals but otherwise left out.
      *
+     * Safe to run repeatedly: a certificate Forge is still issuing counts as
+     * present, a recent failure is left alone unless `$retryRecentFailures`,
+     * and a live sync refuses to start while another is running.
+     *
      * @param  Collection<int, Site>  $sites
-     * @return array{added:int, skipped_existing_domain:int, requested_certificates:int, skipped_existing_certificate:int, failures:int, operations:array<int, array{domain:string, action:string, status:string, error:?string}>}
+     * @return array{added:int, skipped_existing_domain:int, requested_certificates:int, skipped_existing_certificate:int, skipped_recent_failure:int, failures:int, operations:array<int, array{domain:string, action:string, status:string, error:?string}>}
+     *
+     * @throws ForgeSyncInProgress
      */
-    public function sync(Collection $sites, bool $requestCertificates, bool $dryRun, bool $requestDomains = true): array
+    public function sync(Collection $sites, bool $requestCertificates, bool $dryRun, bool $requestDomains = true, bool $retryRecentFailures = false): array
+    {
+        if ($dryRun) {
+            return $this->runSync($sites, $requestCertificates, $dryRun, $requestDomains, $retryRecentFailures);
+        }
+
+        $lock = Cache::lock(self::LOCK_KEY, self::LOCK_SECONDS);
+
+        if (! $lock->get()) {
+            throw new ForgeSyncInProgress;
+        }
+
+        try {
+            return $this->runSync($sites, $requestCertificates, $dryRun, $requestDomains, $retryRecentFailures);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
+     * Whether a live sync is running right now.
+     */
+    public function isSyncing(): bool
+    {
+        $lock = Cache::lock(self::LOCK_KEY, self::LOCK_SECONDS);
+
+        if (! $lock->get()) {
+            return true;
+        }
+
+        $lock->release();
+
+        return false;
+    }
+
+    /**
+     * @param  Collection<int, Site>  $sites
+     * @return array{added:int, skipped_existing_domain:int, requested_certificates:int, skipped_existing_certificate:int, skipped_recent_failure:int, failures:int, operations:array<int, array{domain:string, action:string, status:string, error:?string}>}
+     */
+    private function runSync(Collection $sites, bool $requestCertificates, bool $dryRun, bool $requestDomains, bool $retryRecentFailures): array
     {
         $domainIds = $this->fetchDomainRecords();
-        $existingCertificates = $requestCertificates ? $this->certificateDomains($domainIds) : collect();
+        $certificates = $requestCertificates ? $this->latestCertificates($domainIds) : collect();
 
         $summary = [
             'added' => 0,
             'skipped_existing_domain' => 0,
             'requested_certificates' => 0,
             'skipped_existing_certificate' => 0,
+            'skipped_recent_failure' => 0,
             'failures' => 0,
             'operations' => [],
         ];
@@ -89,8 +156,16 @@ class ForgeDomainProvisioner
                     continue;
                 }
 
-                if ($existingCertificates->contains($domain)) {
+                $certificate = $certificates->get($domain);
+
+                if ($certificate !== null && $certificate['status'] !== self::STATUS_FAILED) {
                     $summary['skipped_existing_certificate']++;
+
+                    continue;
+                }
+
+                if ($certificate !== null && ! $retryRecentFailures && $this->failedRecently($certificate)) {
+                    $summary['skipped_recent_failure']++;
 
                     continue;
                 }
@@ -129,7 +204,7 @@ class ForgeDomainProvisioner
 
                 $summary['requested_certificates']++;
                 $summary['operations'][] = $this->operation($domain, self::ACTION_REQUEST_CERTIFICATE, $succeeded);
-                $existingCertificates->push($domain);
+                $certificates->put($domain, ['status' => 'requested', 'active' => false, 'updated_at' => now()]);
             }
         }
 
@@ -202,11 +277,11 @@ class ForgeDomainProvisioner
 
     /**
      * @param  Collection<int, Site>  $sites
-     * @return array{added:int, skipped_existing_domain:int, requested_certificates:int, skipped_existing_certificate:int, failures:int, operations:array<int, array{domain:string, action:string, status:string, error:?string}>}
+     * @return array{added:int, skipped_existing_domain:int, requested_certificates:int, skipped_existing_certificate:int, skipped_recent_failure:int, failures:int, operations:array<int, array{domain:string, action:string, status:string, error:?string}>}
      */
     public function requestCertificates(Collection $sites, bool $dryRun): array
     {
-        return $this->sync($sites, requestCertificates: true, dryRun: $dryRun, requestDomains: false);
+        return $this->sync($sites, requestCertificates: true, dryRun: $dryRun, requestDomains: false, retryRecentFailures: true);
     }
 
     /**
@@ -231,23 +306,65 @@ class ForgeDomainProvisioner
      */
     private function certificateDomains(Collection $domainIds): Collection
     {
+        return $this->latestCertificates($domainIds)
+            ->filter(fn (array $certificate): bool => $certificate['status'] === 'installed' && $certificate['active'])
+            ->keys()
+            ->values();
+    }
+
+    /**
+     * The most recent certificate on each domain, whatever its state —
+     * installed, still being issued, or failed.
+     *
+     * @param  Collection<string, string>  $domainIds
+     * @return Collection<string, array{status:string, active:bool, updated_at:?Carbon}>
+     */
+    private function latestCertificates(Collection $domainIds): Collection
+    {
         $namesById = $domainIds->flip();
 
         return $this->fetchAll($this->certificatesEndpoint(), 'certificates')
-            ->filter(fn (array $row): bool => ($row['attributes']['status'] ?? null) === 'installed'
-                && ($row['attributes']['active'] ?? false) === true)
-            ->map(function (array $row) use ($namesById): ?string {
+            ->map(function (array $row) use ($namesById): ?array {
                 $href = (string) ($row['links']['self']['href'] ?? '');
 
                 if (preg_match('#/domains/([^/]+)/certificates/#', $href, $matches) !== 1) {
                     return null;
                 }
 
-                return $namesById->get($matches[1]);
+                $domain = $namesById->get($matches[1]);
+
+                if ($domain === null) {
+                    return null;
+                }
+
+                $updatedAt = $row['attributes']['updated_at'] ?? $row['attributes']['created_at'] ?? null;
+
+                return [
+                    'domain' => $domain,
+                    'status' => (string) ($row['attributes']['status'] ?? ''),
+                    'active' => ($row['attributes']['active'] ?? false) === true,
+                    'updated_at' => is_string($updatedAt) ? Carbon::parse($updatedAt) : null,
+                ];
             })
             ->filter()
-            ->unique()
-            ->values();
+            ->groupBy('domain')
+            ->map(function (Collection $rows): array {
+                // A domain can have several: an old failure next to a newer
+                // install. An active one wins; otherwise the latest attempt.
+                $certificate = $rows->firstWhere('active', true)
+                    ?? $rows->sortByDesc(fn (array $row) => $row['updated_at']?->getTimestamp() ?? 0)->first();
+
+                return Arr::except($certificate, 'domain');
+            });
+    }
+
+    /**
+     * @param  array{status:string, active:bool, updated_at:?Carbon}  $certificate
+     */
+    private function failedRecently(array $certificate): bool
+    {
+        return $certificate['updated_at'] !== null
+            && $certificate['updated_at']->gt(now()->subMinutes(self::FAILED_CERTIFICATE_RETRY_AFTER_MINUTES));
     }
 
     /**

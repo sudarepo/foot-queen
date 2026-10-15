@@ -121,6 +121,17 @@ class MultiSiteTest extends TestCase
 
     /* ----------  The shared pool, sliced per site  ---------- */
 
+    /**
+     * A tag typed the way people write it ("Big Cock") would never equal a
+     * room's own tag ('bigcock'), so it is stored the way Chaturbate spells it.
+     */
+    public function test_site_tags_are_stored_in_chaturbate_form(): void
+    {
+        $site = Site::factory()->create(['tags' => ['Big Cock', 'foot-fetish', 'bigcock', '18+', '   ']]);
+
+        $this->assertSame(['bigcock', 'footfetish', '18'], $site->refresh()->tags);
+    }
+
     public function test_each_site_only_lists_performers_matching_its_tags(): void
     {
         $this->bbwSite();

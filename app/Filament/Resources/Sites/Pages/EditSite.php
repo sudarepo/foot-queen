@@ -88,6 +88,7 @@ class EditSite extends EditRecord
                 requestCertificates: $requestCertificates,
                 dryRun: false,
                 requestDomains: $requestDomains,
+                retryRecentFailures: true,
             );
         } catch (Throwable $exception) {
             report($exception);

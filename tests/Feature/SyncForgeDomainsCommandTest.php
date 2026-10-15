@@ -4,8 +4,10 @@ namespace Tests\Feature;
 
 use App\Models\Site;
 use App\Services\Forge\ForgeDomainProvisioner;
+use App\Services\Forge\ForgeSyncInProgress;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -263,6 +265,137 @@ class SyncForgeDomainsCommandTest extends TestCase
         $this->assertSame(0, $result['failures']);
     }
 
+    /**
+     * Every certificate install reloads nginx and PHP-FPM, so a second sync
+     * started mid-run must not touch Forge at all.
+     */
+    public function test_a_live_sync_refuses_to_start_while_another_is_running(): void
+    {
+        $site = Site::factory()->create(['domains' => ['busy.example']]);
+        Http::fake();
+
+        $lock = Cache::lock('forge-domain-sync', 60);
+        $lock->get();
+
+        try {
+            app(ForgeDomainProvisioner::class)->sync(collect([$site]), requestCertificates: true, dryRun: false);
+            $this->fail('A second sync was allowed to run.');
+        } catch (ForgeSyncInProgress) {
+            Http::assertNothingSent();
+        } finally {
+            $lock->release();
+        }
+    }
+
+    public function test_the_command_reports_a_sync_already_running(): void
+    {
+        Site::factory()->create(['domains' => ['busy.example']]);
+        Http::fake();
+
+        $lock = Cache::lock('forge-domain-sync', 60);
+        $lock->get();
+
+        $this->artisan('sites:sync-forge-domains')
+            ->expectsOutputToContain('Another Forge sync is already running')
+            ->assertExitCode(1);
+
+        $lock->release();
+        Http::assertNothingSent();
+    }
+
+    public function test_a_dry_run_is_allowed_while_a_sync_is_running(): void
+    {
+        $site = Site::factory()->create(['domains' => ['busy.example']]);
+
+        Http::fake([
+            self::BASE.'/domains?*' => Http::response($this->domainsPayload([])),
+            self::BASE.'/certificates?*' => Http::response($this->certificatesPayload([])),
+        ]);
+
+        $lock = Cache::lock('forge-domain-sync', 60);
+        $lock->get();
+
+        $result = app(ForgeDomainProvisioner::class)->sync(collect([$site]), requestCertificates: true, dryRun: true);
+        $lock->release();
+
+        $this->assertSame(1, $result['added']);
+    }
+
+    public function test_the_lock_is_released_after_a_sync_so_the_next_one_can_run(): void
+    {
+        $site = Site::factory()->create(['domains' => ['done.example']]);
+
+        Http::fake([
+            self::BASE.'/domains?*' => Http::response($this->domainsPayload(['1' => 'done.example'])),
+            self::BASE.'/certificates?*' => Http::response($this->certificatesPayload(['1' => 'installed'])),
+        ]);
+
+        $provisioner = app(ForgeDomainProvisioner::class);
+        $provisioner->sync(collect([$site]), requestCertificates: true, dryRun: false);
+
+        $this->assertFalse($provisioner->isSyncing());
+        $provisioner->sync(collect([$site]), requestCertificates: true, dryRun: false);
+    }
+
+    /**
+     * Forge issues certificates asynchronously; one still installing from the
+     * last sync is not missing, and requesting it again is another reload.
+     */
+    public function test_a_certificate_still_being_issued_is_not_requested_again(): void
+    {
+        $site = Site::factory()->create(['domains' => ['issuing.example']]);
+
+        Http::fake([
+            self::BASE.'/domains?*' => Http::response($this->domainsPayload(['1' => 'issuing.example'])),
+            self::BASE.'/certificates?*' => Http::response($this->certificatesPayload(['1' => 'installing'])),
+        ]);
+
+        $result = app(ForgeDomainProvisioner::class)->sync(collect([$site]), requestCertificates: true, dryRun: false);
+
+        $this->assertSame(0, $result['requested_certificates']);
+        $this->assertSame(1, $result['skipped_existing_certificate']);
+        Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST');
+    }
+
+    public function test_a_bulk_sync_leaves_a_fresh_certificate_failure_alone(): void
+    {
+        $site = Site::factory()->create(['domains' => ['fresh-fail.example', 'old-fail.example']]);
+
+        Http::fake([
+            self::BASE.'/domains?*' => Http::response($this->domainsPayload(['1' => 'fresh-fail.example', '2' => 'old-fail.example'])),
+            self::BASE.'/certificates?*' => Http::response($this->certificatesPayload(
+                ['1' => 'failed', '2' => 'failed'],
+                updatedAt: ['1' => now()->subMinutes(5)->toIso8601String(), '2' => now()->subHours(3)->toIso8601String()],
+            )),
+            self::BASE.'/domains/2/certificates' => Http::response(['data' => ['id' => '902']], 201),
+        ]);
+
+        $result = app(ForgeDomainProvisioner::class)->sync(collect([$site]), requestCertificates: true, dryRun: false);
+
+        $this->assertSame(1, $result['skipped_recent_failure']);
+        $this->assertSame(1, $result['requested_certificates']);
+        Http::assertNotSent(fn (Request $request): bool => $request->url() === self::BASE.'/domains/1/certificates');
+        Http::assertSent(fn (Request $request): bool => $request->url() === self::BASE.'/domains/2/certificates');
+    }
+
+    public function test_an_explicit_ssl_retry_ignores_the_failure_cooldown(): void
+    {
+        $site = Site::factory()->create(['domains' => ['fresh-fail.example']]);
+
+        Http::fake([
+            self::BASE.'/domains?*' => Http::response($this->domainsPayload(['1' => 'fresh-fail.example'])),
+            self::BASE.'/certificates?*' => Http::response($this->certificatesPayload(
+                ['1' => 'failed'],
+                updatedAt: ['1' => now()->subMinutes(5)->toIso8601String()],
+            )),
+            self::BASE.'/domains/1/certificates' => Http::response(['data' => ['id' => '903']], 201),
+        ]);
+
+        $result = app(ForgeDomainProvisioner::class)->requestCertificates(collect([$site]), dryRun: false);
+
+        $this->assertSame(1, $result['requested_certificates']);
+    }
+
     public function test_it_follows_cursor_pagination(): void
     {
         Http::fake([
@@ -298,15 +431,16 @@ class SyncForgeDomainsCommandTest extends TestCase
 
     /**
      * @param  array<string, string>  $certificates  domain record id => certificate status
+     * @param  array<string, string>  $updatedAt  domain record id => ISO-8601 time of the last change
      * @return array<string, mixed>
      */
-    private function certificatesPayload(array $certificates): array
+    private function certificatesPayload(array $certificates, array $updatedAt = []): array
     {
         return [
             'data' => collect($certificates)->map(fn (string $status, string|int $domainId): array => [
                 'id' => "cert-{$domainId}",
                 'type' => 'certificates',
-                'attributes' => ['type' => 'letsencrypt', 'status' => $status, 'active' => $status === 'installed'],
+                'attributes' => ['type' => 'letsencrypt', 'status' => $status, 'active' => $status === 'installed', 'updated_at' => $updatedAt[$domainId] ?? null],
                 'links' => ['self' => ['href' => self::BASE."/domains/{$domainId}/certificates/cert-{$domainId}"]],
             ])->values()->all(),
         ];

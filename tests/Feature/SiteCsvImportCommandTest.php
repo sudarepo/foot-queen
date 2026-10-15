@@ -100,7 +100,7 @@ class SiteCsvImportCommandTest extends TestCase
 
         $this->assertNotNull($site);
         $this->assertSame(['newsite.com'], $site->domains);
-        $this->assertSame(['tag-one', 'tag-two'], $site->tags);
+        $this->assertSame(['tagone', 'tagtwo'], $site->tags, 'Chaturbate rejects hyphens, so tags are stored without them.');
         $this->assertSame('feed', $site->home_layout_desktop->value);
         $this->assertSame('grid', $site->home_layout_mobile->value);
         $this->assertSame('foot-queen', $site->seo_pages);

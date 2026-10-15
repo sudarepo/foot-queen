@@ -2,8 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Models\Site;
 use App\Services\Providers\ChaturbateProvider;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -84,6 +86,36 @@ class ChaturbateProviderTest extends TestCase
 
         $this->assertStringContainsString('room=foxfilms', $cams[0]['embed_url']);
         $this->assertStringContainsString('disable_sound=1', $cams[0]['embed_url']);
+    }
+
+    /**
+     * Chaturbate rejects a tag with a space or capital ("Enter a valid
+     * value"), so every request the sync makes must carry one it accepts.
+     */
+    public function test_it_only_sends_tags_in_the_form_chaturbate_accepts(): void
+    {
+        config([
+            'cam-providers.chaturbate.affiliate_id' => 'Vg4Qi',
+            'cam-providers.chaturbate.campaign' => 'default',
+        ]);
+
+        Site::query()->update(['is_active' => false]);
+        Site::factory()->create(['is_active' => true]);
+        DB::table('sites')->where('is_active', true)->update(['tags' => json_encode(['Big Cock', 'foot fetish', 'feet', '!!!'])]);
+
+        Http::fake(['chaturbate.com/*' => Http::response(['count' => 0, 'results' => []])]);
+
+        app(ChaturbateProvider::class)->fetchCams();
+
+        $sentTags = [];
+        Http::assertSent(function ($request) use (&$sentTags): bool {
+            parse_str(parse_url($request->url(), PHP_URL_QUERY) ?? '', $query);
+            $sentTags[] = $query['tag'] ?? null;
+
+            return true;
+        });
+
+        $this->assertEqualsCanonicalizing(['bigcock', 'footfetish', 'feet'], $sentTags);
     }
 
     public function test_it_merges_and_dedupes_results_across_multiple_tags(): void
