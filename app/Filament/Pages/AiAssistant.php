@@ -26,7 +26,6 @@ use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Auth;
-use Livewire\Attributes\Url;
 
 /**
  * Connecting an AI assistant (Claude) to the admin MCP server, without a
@@ -34,13 +33,12 @@ use Livewire\Attributes\Url;
  * somewhere is shown with that key and this domain already filled in, each
  * box copied with a single click.
  *
- * The setup stays on the page — for the signed-in admin's newest key, or the
- * one picked in "Your keys" — so it can be come back to on another day or
- * another computer. Keys are recoverable for this because McpToken keeps an
- * encrypted copy; see the trade-off described there.
+ * The setup stays on the page for the signed-in admin's newest key — which,
+ * right after "Create", is the one just made — and any older key's setup
+ * opens in a slide-over from "Your keys". Keys are recoverable for this
+ * because McpToken keeps an encrypted copy; see the trade-off described there.
  *
- * Strictly per person: each admin sees and revokes only their own keys, and
- * the `key` URL parameter is only ever resolved against those.
+ * Strictly per person: each admin sees and revokes only their own keys.
  */
 class AiAssistant extends Page implements HasTable
 {
@@ -53,10 +51,6 @@ class AiAssistant extends Page implements HasTable
     protected static ?string $title = 'Connect an AI assistant';
 
     protected static ?int $navigationSort = 19;
-
-    /** Which of the user's keys the setup steps are written out for. */
-    #[Url(as: 'key')]
-    public ?int $keyId = null;
 
     /**
      * The server can change anything in the network, so the page that hands
@@ -94,13 +88,11 @@ class AiAssistant extends Page implements HasTable
                         ->selectablePlaceholder(false),
                 ])
                 ->action(function (array $data): void {
-                    [$token] = McpToken::issue(
+                    McpToken::issue(
                         $this->user(),
                         $data['name'],
                         $data['expires'] !== 'never' ? now()->addDays((int) $data['expires']) : null,
                     );
-
-                    $this->keyId = $token->id;
 
                     Notification::make()
                         ->title('Key created — follow the steps below')
@@ -113,23 +105,18 @@ class AiAssistant extends Page implements HasTable
     public function content(Schema $schema): Schema
     {
         /**
-         * Everything is always built and toggled by closures: Filament builds
+         * The steps are always built and toggled by closures: Filament builds
          * this schema once per request, before an action runs, so branching
-         * here would only reflect a newly created or picked key on the *next*
-         * request.
+         * here would only show a just-created key on the *next* request.
          */
         return $schema->components([
             $this->introduction(),
             ...array_map(
-                fn (Section|Callout $component) => $component->visible(fn (): bool => $this->selectedSecret() !== null),
-                $this->setupSections(),
+                fn (Section|Callout $component) => $component->visible(fn (): bool => $this->newestKey()?->secret !== null),
+                $this->setupSections(fn (): ?McpToken => $this->newestKey()),
             ),
-            Callout::make('This key can\'t be shown again')
-                ->description('It was created before keys could be looked up again. Revoke it and create a new one to get the setup steps.')
-                ->warning()
-                ->visible(fn (): bool => $this->selectedKey() !== null && $this->selectedSecret() === null),
             Section::make('Your keys')
-                ->description('Click "Setup steps" on a key to show its instructions above. Revoke any key you no longer use, or that might have been shared by mistake.')
+                ->description('"Setup steps" shows the instructions for any of your keys. Revoke any key you no longer use, or that might have been shared by mistake.')
                 ->schema([EmbeddedTable::make()]),
         ]);
     }
@@ -140,10 +127,6 @@ class AiAssistant extends Page implements HasTable
             ->query(fn () => $this->ownKeys()->getQuery())
             ->defaultSort('created_at', 'desc')
             ->columns([
-                TextColumn::make('is_selected')
-                    ->label('')
-                    ->state(fn (McpToken $record): ?string => $record->is($this->selectedKey()) ? 'Steps shown above' : null)
-                    ->badge(),
                 TextColumn::make('name'),
                 TextColumn::make('created_at')->label('Created')->since(),
                 TextColumn::make('last_used_at')->label('Last used')->since()->placeholder('Never'),
@@ -154,9 +137,16 @@ class AiAssistant extends Page implements HasTable
                     ->label('Setup steps')
                     ->icon(Heroicon::OutlinedClipboardDocumentList)
                     ->color('gray')
-                    ->action(function (McpToken $record): void {
-                        $this->keyId = $record->id;
-                    }),
+                    ->slideOver()
+                    ->modalHeading(fn (McpToken $record): string => 'Setup steps for "'.$record->name.'"')
+                    ->modalDescription('Everything below already has this key filled in.')
+                    ->schema(fn (McpToken $record): array => $record->secret === null
+                        ? [Callout::make('This key can\'t be shown again')
+                            ->description('It was created before keys could be looked up again. Revoke it and create a new one.')
+                            ->warning()]
+                        : $this->setupSections(fn (): McpToken => $record))
+                    ->modalSubmitAction(false)
+                    ->modalCancelActionLabel('Close'),
                 Action::make('revoke')
                     ->label('Revoke')
                     ->icon(Heroicon::OutlinedNoSymbol)
@@ -164,13 +154,7 @@ class AiAssistant extends Page implements HasTable
                     ->requiresConfirmation()
                     ->modalHeading('Revoke this key?')
                     ->modalDescription('Any assistant using it stops working straight away. This can\'t be undone — you\'d create a new key instead.')
-                    ->action(function (McpToken $record): void {
-                        $record->delete();
-
-                        if ($this->keyId === $record->id) {
-                            $this->keyId = null;
-                        }
-                    }),
+                    ->action(fn (McpToken $record) => $record->delete()),
             ])
             ->emptyStateHeading('No keys yet')
             ->emptyStateDescription('Use "Create a connection key" at the top of the page.');
@@ -193,21 +177,12 @@ class AiAssistant extends Page implements HasTable
     }
 
     /**
-     * The key picked in the table (or just created), else the newest one.
-     * Looked up through the user's own keys only, so another admin's key id
-     * in the URL resolves to nothing rather than to their key.
+     * The key the page's own steps are written for — after "Create", the one
+     * just made.
      */
-    private function selectedKey(): ?McpToken
+    private function newestKey(): ?McpToken
     {
-        $keys = $this->ownKeys();
-
-        return ($this->keyId !== null ? (clone $keys)->find($this->keyId) : null)
-            ?? $keys->latest('id')->first();
-    }
-
-    private function selectedSecret(): ?string
-    {
-        return $this->selectedKey()?->secret;
+        return $this->ownKeys()->latest('id')->first();
     }
 
     /* ----------  Introduction  ---------- */
@@ -217,7 +192,7 @@ class AiAssistant extends Page implements HasTable
         return Section::make('What this does')
             ->schema([
                 Text::make('Connect Claude to this admin, then just ask it things in plain English — "How did each site do this week?", "Change the homepage title on ebony18 to …", "Pause the Acme ads". Claude reads and changes the same data you see here.'),
-                Text::make(fn (): string => $this->selectedKey() === null
+                Text::make(fn (): string => $this->newestKey() === null
                     ? 'To start, click "Create a connection key" at the top of this page. The steps to set up Claude will appear here, with your key already filled in.'
                     : 'The steps below are always here — come back any time you set up Claude on another computer. Wherever you see grey text in a box, one click copies the whole thing.'),
                 Callout::make('Treat a key like a password.')
@@ -226,15 +201,22 @@ class AiAssistant extends Page implements HasTable
             ]);
     }
 
-    /* ----------  Setup steps for the selected key  ---------- */
+    /* ----------  Setup steps for one key  ---------- */
 
     /**
+     * Shared by the page (newest key) and the "Setup steps" slide-over (the
+     * key clicked). The key comes in as a closure so the page's copy is
+     * resolved when it renders rather than when the schema is built.
+     *
+     * @param  Closure(): ?McpToken  $key
      * @return array<int, Section|Callout>
      */
-    private function setupSections(): array
+    private function setupSections(Closure $key): array
     {
+        $secret = fn (): string => (string) $key()?->secret;
+
         return [
-            Section::make(fn (): string => 'Setting up Claude with your key "'.$this->selectedKey()?->name.'"')
+            Section::make(fn (): string => 'Setting up Claude with your key "'.$key()?->name.'"')
                 ->description('Do steps 1–3 once on each computer you want to use Claude on.')
                 ->schema([
                     Text::make('Step 1 — Install (once per computer)')->weight(FontWeight::Bold),
@@ -244,7 +226,7 @@ class AiAssistant extends Page implements HasTable
                     Text::make('Step 2 — Paste into Claude')->weight(FontWeight::Bold),
                     Text::make('In Claude Desktop open Settings → Developer → Edit Config. A file called claude_desktop_config.json opens in a text editor.'),
                     Text::make('If the file is empty or only contains {} — select everything in it and delete it. Then click the grey text below once (it copies itself — you\'ll see "Copied") and paste it into the file. If the file already has other text in it, don\'t paste: send it to your developer.'),
-                    $this->copyBox('Click to copy', fn (): string => $this->claudeDesktopConfig()),
+                    $this->copyBox('Click to copy', fn (): string => $this->claudeDesktopConfig($secret())),
                     Text::make('Save the file, then quit Claude completely (Mac: Claude menu → Quit. Windows: right-click the Claude icon by the clock → Quit) and open it again.'),
 
                     Text::make('Step 3 — Check it works')->weight(FontWeight::Bold),
@@ -268,9 +250,9 @@ class AiAssistant extends Page implements HasTable
             Section::make('Other ways to connect (for developers)')
                 ->collapsed()
                 ->schema([
-                    $this->copyBox('The key on its own', fn (): string => (string) $this->selectedSecret()),
+                    $this->copyBox('The key on its own', $secret),
                     $this->copyBox('Server address', $this->serverUrl()),
-                    $this->copyBox('Claude Code (terminal) — one command', fn (): string => $this->claudeCodeCommand()),
+                    $this->copyBox('Claude Code (terminal) — one command', fn (): string => $this->claudeCodeCommand($secret())),
                     Text::make('ChatGPT and the claude.ai website can\'t use this kind of key yet. OpenAI API, Codex and other setups are described in MCP.md in the code.'),
                 ]),
         ];
@@ -297,25 +279,25 @@ class AiAssistant extends Page implements HasTable
      * in through the mcp-remote bridge. The `Authorization:${AUTH_HEADER}`
      * spelling (no space) dodges an argument-escaping bug on Windows.
      */
-    private function claudeDesktopConfig(): string
+    private function claudeDesktopConfig(string $secret): string
     {
         return json_encode([
             'mcpServers' => [
                 'foot-queen' => [
                     'command' => 'npx',
                     'args' => ['-y', 'mcp-remote', $this->serverUrl(), '--header', 'Authorization:${AUTH_HEADER}'],
-                    'env' => ['AUTH_HEADER' => 'Bearer '.$this->selectedSecret()],
+                    'env' => ['AUTH_HEADER' => 'Bearer '.$secret],
                 ],
             ],
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
     }
 
-    private function claudeCodeCommand(): string
+    private function claudeCodeCommand(string $secret): string
     {
         return sprintf(
             'claude mcp add --transport http --scope user foot-queen %s --header "Authorization: Bearer %s"',
             $this->serverUrl(),
-            $this->selectedSecret(),
+            $secret,
         );
     }
 }
