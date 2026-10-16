@@ -3,11 +3,16 @@
 namespace Tests\Feature;
 
 use App\Filament\Resources\Sites\Pages\EditSite;
+use App\Jobs\AddSiteToForge;
+use App\Jobs\CheckSiteForgeStatus;
+use App\Jobs\RequestSiteSsl;
 use App\Models\Site;
 use App\Models\User;
+use App\Services\Forge\ForgeDomainStatus;
+use App\Services\Forge\ForgeSslStatus;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -21,6 +26,10 @@ class EditSiteForgeActionsTest extends TestCase
     {
         parent::setUp();
 
+        // Creating a site queues its Forge provisioning; these tests drive
+        // Forge themselves, so those jobs are only recorded, not run.
+        Queue::fake([AddSiteToForge::class, RequestSiteSsl::class, CheckSiteForgeStatus::class]);
+
         config()->set('services.forge.base_url', 'https://forge.example.test/api/orgs/acme');
         config()->set('services.forge.token', 'forge-token');
         config()->set('services.forge.server_id', '10');
@@ -29,54 +38,77 @@ class EditSiteForgeActionsTest extends TestCase
         $this->actingAs(User::factory()->create(['is_admin' => true]));
     }
 
-    public function test_add_to_forge_is_shown_and_adds_only_the_domain_when_missing(): void
+    public function test_add_to_forge_queues_provisioning_for_a_site_missing_from_forge(): void
     {
-        $site = Site::factory()->create(['domains' => ['new-domain.example']]);
-
-        Http::fake([
-            self::BASE.'/domains?*' => Http::response($this->domainsPayload([])),
-            self::BASE.'/certificates?*' => Http::response($this->certificatesPayload([])),
-            self::BASE.'/domains' => Http::response(['data' => ['id' => '55', 'type' => 'domainRecords']], 201),
-        ]);
+        $site = $this->siteWithStatus(ForgeDomainStatus::Missing, ForgeSslStatus::Missing);
+        Http::fake();
 
         Livewire::test(EditSite::class, ['record' => $site->getRouteKey()])
-            ->assertActionVisible('addToForge')
-            ->assertActionHidden('requestSsl')
-            ->callAction('addToForge')
-            ->assertNotified('Forge sync finished');
+            ->assertActionVisible('provisionInForge')
+            ->assertActionHasLabel('provisionInForge', 'Add to Forge')
+            ->callAction('provisionInForge')
+            ->assertNotified('Forge setup started');
 
-        Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
-            && $request->url() === self::BASE.'/domains'
-            && $request['name'] === 'new-domain.example');
-        Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), '/certificates')
-            && $request->method() === 'POST');
+        Queue::assertPushed(AddSiteToForge::class, fn (AddSiteToForge $job): bool => $job->siteId === $site->id);
+        Queue::assertNotPushed(RequestSiteSsl::class);
+        $this->assertSame(ForgeDomainStatus::InProgress, $site->refresh()->forge_domain_status);
+        $this->assertSame(ForgeSslStatus::Queued, $site->forge_ssl_status);
+        Http::assertNothingSent();
     }
 
-    public function test_request_ssl_is_shown_and_requests_only_the_certificate_when_domain_exists(): void
+    public function test_retry_ssl_is_offered_when_the_domain_is_in_forge_but_ssl_failed(): void
     {
-        $site = Site::factory()->create(['domains' => ['no-ssl.example']]);
-
-        Http::fake([
-            self::BASE.'/domains?*' => Http::response($this->domainsPayload(['7' => 'no-ssl.example'])),
-            self::BASE.'/certificates?*' => Http::response($this->certificatesPayload(['7' => 'failed'])),
-            self::BASE.'/domains/7/certificates' => Http::response(['data' => ['id' => '901']], 201),
-        ]);
+        $site = $this->siteWithStatus(ForgeDomainStatus::Provisioned, ForgeSslStatus::Failed);
 
         Livewire::test(EditSite::class, ['record' => $site->getRouteKey()])
-            ->assertActionHidden('addToForge')
-            ->assertActionVisible('requestSsl')
-            ->callAction('requestSsl')
-            ->assertNotified('Forge sync finished');
+            ->assertActionVisible('provisionInForge')
+            ->assertActionHasLabel('provisionInForge', 'Retry SSL')
+            ->callAction('provisionInForge');
 
-        Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
-            && $request->url() === self::BASE.'/domains/7/certificates');
-        Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST'
-            && $request->url() === self::BASE.'/domains');
+        Queue::assertPushed(RequestSiteSsl::class, fn (RequestSiteSsl $job): bool => $job->siteId === $site->id);
+        // Only the push from creating the site; Retry SSL doesn't re-add the domain.
+        Queue::assertPushed(AddSiteToForge::class, 1);
+        $this->assertSame(ForgeSslStatus::Queued, $site->refresh()->forge_ssl_status);
     }
 
-    public function test_no_forge_actions_are_shown_when_the_site_is_fully_provisioned(): void
+    public function test_nothing_to_redo_while_ssl_is_queued(): void
     {
-        $site = Site::factory()->create(['domains' => ['done.example']]);
+        $site = $this->siteWithStatus(ForgeDomainStatus::Provisioned, ForgeSslStatus::Queued);
+
+        Livewire::test(EditSite::class, ['record' => $site->getRouteKey()])
+            ->assertActionHidden('provisionInForge');
+    }
+
+    public function test_nothing_to_redo_when_the_site_is_fully_provisioned(): void
+    {
+        $site = $this->siteWithStatus(ForgeDomainStatus::Provisioned, ForgeSslStatus::Installed);
+
+        Livewire::test(EditSite::class, ['record' => $site->getRouteKey()])
+            ->assertActionHidden('provisionInForge')
+            ->assertActionVisible('checkForgeStatus');
+    }
+
+    public function test_nothing_to_redo_while_provisioning_is_in_progress(): void
+    {
+        $site = $this->siteWithStatus(ForgeDomainStatus::Provisioned, ForgeSslStatus::InProgress);
+
+        Livewire::test(EditSite::class, ['record' => $site->getRouteKey()])
+            ->assertActionHidden('provisionInForge');
+    }
+
+    public function test_opening_the_edit_page_does_not_call_forge(): void
+    {
+        $site = $this->siteWithStatus(ForgeDomainStatus::Missing, ForgeSslStatus::Missing);
+        Http::fake();
+
+        Livewire::test(EditSite::class, ['record' => $site->getRouteKey()])->assertSuccessful();
+
+        Http::assertNothingSent();
+    }
+
+    public function test_recheck_reads_forge_and_records_the_status(): void
+    {
+        $site = $this->siteWithStatus(ForgeDomainStatus::Missing, ForgeSslStatus::Missing, ['done.example']);
 
         Http::fake([
             self::BASE.'/domains?*' => Http::response($this->domainsPayload(['1' => 'done.example'])),
@@ -84,36 +116,38 @@ class EditSiteForgeActionsTest extends TestCase
         ]);
 
         Livewire::test(EditSite::class, ['record' => $site->getRouteKey()])
-            ->assertActionHidden('addToForge')
-            ->assertActionHidden('requestSsl');
-    }
+            ->callAction('checkForgeStatus')
+            ->assertNotified('Forge: Provisioned · SSL: Installed');
 
-    public function test_no_forge_actions_are_shown_when_forge_is_unreachable(): void
-    {
-        $site = Site::factory()->create(['domains' => ['new-domain.example']]);
-
-        Http::fake([
-            self::BASE.'/domains?*' => Http::response('Server error', 500),
-        ]);
-
-        Livewire::test(EditSite::class, ['record' => $site->getRouteKey()])
-            ->assertActionHidden('addToForge')
-            ->assertActionHidden('requestSsl');
+        $site->refresh();
+        $this->assertSame(ForgeDomainStatus::Provisioned, $site->forge_domain_status);
+        $this->assertSame(ForgeSslStatus::Installed, $site->forge_ssl_status);
+        $this->assertNotNull($site->forge_checked_at);
     }
 
     public function test_no_forge_actions_are_shown_when_forge_is_not_configured(): void
     {
         config()->set('services.forge.token', null);
 
-        $site = Site::factory()->create(['domains' => ['new-domain.example']]);
-
+        $site = $this->siteWithStatus(ForgeDomainStatus::Missing, ForgeSslStatus::Missing);
         Http::fake();
 
         Livewire::test(EditSite::class, ['record' => $site->getRouteKey()])
-            ->assertActionHidden('addToForge')
-            ->assertActionHidden('requestSsl');
+            ->assertActionHidden('provisionInForge')
+            ->assertActionHidden('checkForgeStatus');
 
         Http::assertNothingSent();
+    }
+
+    /**
+     * @param  array<int, string>  $domains
+     */
+    private function siteWithStatus(ForgeDomainStatus $domain, ForgeSslStatus $ssl, array $domains = ['site.example']): Site
+    {
+        $site = Site::factory()->create(['domains' => $domains]);
+        Site::query()->whereKey($site->id)->update(['forge_domain_status' => $domain->value, 'forge_ssl_status' => $ssl->value]);
+
+        return $site->refresh();
     }
 
     /**

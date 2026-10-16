@@ -2,10 +2,13 @@
 
 namespace App\Filament\Resources\Sites\Pages;
 
-use App\Filament\Resources\Sites\ForgeSyncNotification;
 use App\Filament\Resources\Sites\SiteResource;
+use App\Jobs\AddSiteToForge;
+use App\Jobs\RequestSiteSsl;
 use App\Models\Site;
 use App\Services\Forge\ForgeDomainProvisioner;
+use App\Services\Forge\ForgeDomainStatus;
+use App\Services\Forge\ForgeSslStatus;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
 use Filament\Notifications\Notification;
@@ -14,42 +17,89 @@ use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Facades\Auth;
 use Throwable;
 
+/**
+ * Forge is set up automatically when a site is created or its domains change
+ * (see Site::booted()). The actions here are for when that went wrong: redo
+ * this one site, or re-read its status from Forge.
+ */
 class EditSite extends EditRecord
 {
     protected static string $resource = SiteResource::class;
 
-    /**
-     * Forge status for this site, memoized for the current request only.
-     *
-     * @var array{missing_domains:array<int, string>, missing_certificates:array<int, string>}|null
-     */
-    private ?array $forgeStatus = null;
-
     protected function getHeaderActions(): array
     {
         return [
-            Action::make('addToForge')
-                ->label('Add to Forge')
+            Action::make('provisionInForge')
+                ->label(fn (): string => $this->domainIsInForge() ? 'Retry SSL' : 'Add to Forge')
                 ->icon(Heroicon::OutlinedServerStack)
                 ->color('gray')
-                ->visible(fn (): bool => $this->canManageForge() && $this->forgeStatus()['missing_domains'] !== [])
+                ->visible(fn (): bool => $this->canManageForge() && $this->needsProvisioning())
                 ->requiresConfirmation()
-                ->modalHeading('Add domains to Forge')
-                ->modalDescription(fn (): string => 'Adds '.implode(', ', $this->forgeStatus()['missing_domains']).' to Forge. SSL can be requested once the domains are added.')
-                ->action(fn () => $this->syncWithForge(requestDomains: true, requestCertificates: false)),
-            Action::make('requestSsl')
-                ->label('Request SSL')
-                ->icon(Heroicon::OutlinedShieldCheck)
+                ->modalHeading(fn (): string => $this->domainIsInForge() ? 'Request SSL again' : 'Add this site to Forge')
+                ->modalDescription(fn (): string => $this->domainIsInForge()
+                    ? 'Queues a new Let\'s Encrypt request for '.implode(', ', $this->site()->domains ?? []).'.'
+                    : 'Queues '.implode(', ', $this->site()->domains ?? []).' to be added to Forge; SSL is requested automatically once the domain is in.')
+                ->action(function (): void {
+                    $this->domainIsInForge()
+                        ? RequestSiteSsl::queueFor($this->site())
+                        : AddSiteToForge::queueFor($this->site());
+
+                    Notification::make()
+                        ->title('Forge setup started')
+                        ->body('It starts within a minute. The Forge and SSL status update as it goes.')
+                        ->success()
+                        ->send();
+                }),
+            Action::make('checkForgeStatus')
+                ->label('Re-check Forge')
+                ->icon(Heroicon::OutlinedArrowPath)
                 ->color('gray')
-                ->visible(fn (): bool => $this->canManageForge()
-                    && $this->forgeStatus()['missing_domains'] === []
-                    && $this->forgeStatus()['missing_certificates'] !== [])
-                ->requiresConfirmation()
-                ->modalHeading('Request SSL certificate')
-                ->modalDescription(fn (): string => 'Requests a Let\'s Encrypt certificate in Forge for '.implode(', ', $this->forgeStatus()['missing_certificates']).'.')
-                ->action(fn () => $this->syncWithForge(requestDomains: false, requestCertificates: true)),
+                ->visible(fn (): bool => $this->canManageForge())
+                ->action(function (): void {
+                    try {
+                        app(ForgeDomainProvisioner::class)->recordStatuses(
+                            collect([$this->site()]),
+                            fresh: true,
+                            errors: array_filter([$this->site()->getKey() => $this->site()->forge_error]),
+                        );
+                    } catch (Throwable $exception) {
+                        report($exception);
+
+                        Notification::make()->title('Could not read Forge')->body(e($exception->getMessage()))->danger()->send();
+
+                        return;
+                    }
+
+                    $site = $this->site()->refresh();
+
+                    Notification::make()
+                        ->title('Forge: '.$site->forge_domain_status->label().' · SSL: '.$site->forge_ssl_status->label())
+                        ->success()
+                        ->send();
+                }),
             DeleteAction::make(),
         ];
+    }
+
+    public function getSubheading(): ?string
+    {
+        if (! $this->canManageForge()) {
+            return null;
+        }
+
+        $site = $this->site();
+        $checked = $site->forge_checked_at === null ? 'never checked' : 'checked '.$site->forge_checked_at->diffForHumans();
+
+        return "Forge: {$site->forge_domain_status->label()} · SSL: {$site->forge_ssl_status->label()} ({$checked})"
+            .($site->forge_error ? " — {$site->forge_error}" : '');
+    }
+
+    private function site(): Site
+    {
+        /** @var Site $site */
+        $site = $this->getRecord();
+
+        return $site;
     }
 
     private function canManageForge(): bool
@@ -57,53 +107,23 @@ class EditSite extends EditRecord
         return (bool) Auth::user()?->isAdmin() && app(ForgeDomainProvisioner::class)->isConfigured();
     }
 
-    /**
-     * Reports nothing missing when Forge can't be reached, so the buttons hide.
-     *
-     * @return array{missing_domains:array<int, string>, missing_certificates:array<int, string>}
-     */
-    private function forgeStatus(): array
+    private function domainIsInForge(): bool
     {
-        if ($this->forgeStatus !== null) {
-            return $this->forgeStatus;
-        }
-
-        /** @var Site $site */
-        $site = $this->getRecord();
-
-        try {
-            return $this->forgeStatus = app(ForgeDomainProvisioner::class)->siteStatus($site);
-        } catch (Throwable $exception) {
-            report($exception);
-
-            return $this->forgeStatus = ['missing_domains' => [], 'missing_certificates' => []];
-        }
+        return $this->site()->forge_domain_status === ForgeDomainStatus::Provisioned;
     }
 
-    private function syncWithForge(bool $requestDomains, bool $requestCertificates): void
+    private function needsProvisioning(): bool
     {
-        try {
-            $result = app(ForgeDomainProvisioner::class)->sync(
-                collect([$this->getRecord()]),
-                requestCertificates: $requestCertificates,
-                dryRun: false,
-                requestDomains: $requestDomains,
-                retryRecentFailures: true,
-            );
-        } catch (Throwable $exception) {
-            report($exception);
+        $site = $this->site();
 
-            Notification::make()
-                ->title('Forge sync failed')
-                ->body(e($exception->getMessage()))
-                ->danger()
-                ->send();
+        $busy = $site->forge_domain_status === ForgeDomainStatus::InProgress
+            || in_array($site->forge_ssl_status, [ForgeSslStatus::Queued, ForgeSslStatus::InProgress], true);
 
-            return;
+        if (blank($site->domains) || $busy) {
+            return false;
         }
 
-        $this->forgeStatus = null;
-
-        ForgeSyncNotification::make($result, dryRun: false)->send();
+        return $site->forge_domain_status !== ForgeDomainStatus::Provisioned
+            || $site->forge_ssl_status !== ForgeSslStatus::Installed;
     }
 }

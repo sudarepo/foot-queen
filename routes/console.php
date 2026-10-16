@@ -28,6 +28,12 @@ Schedule::command('cams:sync-profiles')->everyFifteenMinutes()->withoutOverlappi
 Schedule::command('chaturbate:sync-stats')->hourly()->withoutOverlapping(10);
 
 /*
+ * Sites record their Forge status as they're provisioned; this catches what
+ * changed in Forge directly — a domain removed, a certificate expired.
+ */
+Schedule::command('sites:check-forge-status')->weekly()->withoutOverlapping(30);
+
+/*
  * There's no queue daemon on the server, so the scheduler drains the queue
  * once a minute. It matters for the Forge sync above all: run from a web
  * request, the PHP-FPM reloads each new certificate triggers kill the sync
