@@ -57,6 +57,19 @@ class ForgeDomainProvisioner
 
     private const MAX_RETRY_AFTER_SECONDS = 120;
 
+    /**
+     * What's in Forge, cached for the admin screens. A provisioned domain
+     * with an installed certificate doesn't change between page loads, and
+     * reading it live cost several paginated API calls on every load of the
+     * sites list. Anything this app changes in Forge clears it.
+     */
+    private const SNAPSHOT_CACHE_KEY = 'forge-domain-snapshot';
+
+    private const SNAPSHOT_TTL_SECONDS = 3600;
+
+    /** While Forge is still issuing a certificate, check back soon. */
+    private const SNAPSHOT_PENDING_TTL_SECONDS = 60;
+
     public function isConfigured(): bool
     {
         return filled($this->token())
@@ -93,8 +106,54 @@ class ForgeDomainProvisioner
         try {
             return $this->runSync($sites, $requestCertificates, $dryRun, $requestDomains, $retryRecentFailures);
         } finally {
+            $this->forgetSnapshot();
             $lock->release();
         }
+    }
+
+    /**
+     * Domains and installed certificates, from cache when it's fresh.
+     *
+     * A failed read isn't cached, so Forge being briefly unreachable doesn't
+     * pin an "unknown" status on the admin for an hour.
+     *
+     * @return array{domains: array<int, string>, certificates: array<int, string>, pending_certificates: array<int, string>}
+     *
+     * @throws \RuntimeException when Forge can't be read
+     */
+    public function snapshot(): array
+    {
+        $cached = Cache::get(self::SNAPSHOT_CACHE_KEY);
+
+        if (is_array($cached) && isset($cached['domains'], $cached['certificates'], $cached['pending_certificates'])) {
+            return $cached;
+        }
+
+        $domainIds = $this->fetchDomainRecords();
+        $certificates = $this->latestCertificates($domainIds);
+
+        $snapshot = [
+            'domains' => $domainIds->keys()->values()->all(),
+            'certificates' => $certificates
+                ->filter(fn (array $certificate): bool => $certificate['status'] === 'installed' && $certificate['active'])
+                ->keys()->values()->all(),
+            'pending_certificates' => $certificates
+                ->reject(fn (array $certificate): bool => in_array($certificate['status'], ['installed', self::STATUS_FAILED], true))
+                ->keys()->values()->all(),
+        ];
+
+        Cache::put(
+            self::SNAPSHOT_CACHE_KEY,
+            $snapshot,
+            $snapshot['pending_certificates'] === [] ? self::SNAPSHOT_TTL_SECONDS : self::SNAPSHOT_PENDING_TTL_SECONDS,
+        );
+
+        return $snapshot;
+    }
+
+    public function forgetSnapshot(): void
+    {
+        Cache::forget(self::SNAPSHOT_CACHE_KEY);
     }
 
     /**
@@ -230,14 +289,13 @@ class ForgeDomainProvisioner
      */
     public function siteStatus(Site $site): array
     {
-        $domainIds = $this->fetchDomainRecords();
-        $certificates = $this->certificateDomains($domainIds);
+        $snapshot = $this->snapshot();
         $domains = $this->siteDomains($site);
 
         return [
-            'missing_domains' => $domains->reject(fn (string $domain): bool => $domainIds->has($domain))->values()->all(),
+            'missing_domains' => $domains->reject(fn (string $domain): bool => in_array($domain, $snapshot['domains'], true))->values()->all(),
             'missing_certificates' => $domains
-                ->filter(fn (string $domain): bool => $domainIds->has($domain) && ! $certificates->contains($domain))
+                ->filter(fn (string $domain): bool => in_array($domain, $snapshot['domains'], true) && ! in_array($domain, $snapshot['certificates'], true))
                 ->values()
                 ->all(),
         ];
