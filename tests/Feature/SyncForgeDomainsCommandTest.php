@@ -2,6 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\AddSiteToForge;
+use App\Jobs\CheckSiteForgeStatus;
+use App\Jobs\RequestSiteSsl;
 use App\Models\Site;
 use App\Services\Forge\ForgeDomainProvisioner;
 use App\Services\Forge\ForgeSyncInProgress;
@@ -9,6 +12,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Sleep;
 use Tests\TestCase;
 
@@ -21,6 +25,10 @@ class SyncForgeDomainsCommandTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // Creating a site queues its Forge provisioning; these tests drive
+        // Forge themselves, so those jobs are only recorded, not run.
+        Queue::fake([AddSiteToForge::class, RequestSiteSsl::class, CheckSiteForgeStatus::class]);
 
         config()->set('services.forge.base_url', 'https://forge.example.test/api/orgs/acme');
         config()->set('services.forge.token', 'forge-token');
@@ -102,7 +110,8 @@ class SyncForgeDomainsCommandTest extends TestCase
             ->expectsOutputToContain('certificate request submitted')
             ->assertExitCode(0);
 
-        Http::assertSentCount(4);
+        // Two reads, two writes, then a fresh read to record the new status.
+        Http::assertSentCount(6);
 
         Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
             && $request->url() === self::BASE.'/domains'
@@ -183,7 +192,8 @@ class SyncForgeDomainsCommandTest extends TestCase
             ->expectsOutputToContain('certificate request submitted')
             ->assertExitCode(0);
 
-        Http::assertSentCount(3);
+        // Two reads, one write, then a fresh read to record the new status.
+        Http::assertSentCount(5);
         Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST'
             && $request->url() === self::BASE.'/domains');
     }

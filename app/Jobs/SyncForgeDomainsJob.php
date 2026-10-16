@@ -6,11 +6,13 @@ use App\Filament\Resources\Sites\ForgeSyncNotification;
 use App\Models\Site;
 use App\Models\User;
 use App\Services\Forge\ForgeDomainProvisioner;
+use App\Services\Forge\ForgeSslStatus;
 use App\Services\Forge\ForgeSyncInProgress;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -80,7 +82,41 @@ class SyncForgeDomainsJob implements ShouldBeUnique, ShouldQueue
 
         Log::info('Forge sync finished', collect($result)->except('operations')->all());
 
+        $this->recordStatuses($provisioner, $sites, $result);
+
         $this->notify(ForgeSyncNotification::make($result, dryRun: false));
+    }
+
+    /**
+     * Store what the sync left behind on each site, and keep checking the
+     * ones whose certificates Forge is still issuing.
+     *
+     * @param  Collection<int, Site>  $sites
+     * @param  array{operations: array<int, array{domain: string, status: string, error: ?string}>}  $result
+     */
+    private function recordStatuses(ForgeDomainProvisioner $provisioner, Collection $sites, array $result): void
+    {
+        $failures = collect($result['operations'])->where('status', ForgeDomainProvisioner::STATUS_FAILED);
+
+        $errors = $sites->mapWithKeys(function (Site $site) use ($failures): array {
+            $failure = $failures->first(fn (array $operation): bool => in_array($operation['domain'], array_map('strtolower', $site->domains ?? []), true));
+
+            return [$site->getKey() => $failure === null ? null : "{$failure['domain']}: {$failure['error']}"];
+        })->filter()->all();
+
+        try {
+            $provisioner->recordStatuses($sites, fresh: true, errors: $errors);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return;
+        }
+
+        Site::query()
+            ->whereKey($sites->modelKeys())
+            ->where('forge_ssl_status', ForgeSslStatus::InProgress)
+            ->pluck('id')
+            ->each(fn (int $siteId) => CheckSiteForgeStatus::dispatch($siteId)->delay(now()->addMinutes(CheckSiteForgeStatus::INTERVAL_MINUTES)));
     }
 
     private function notify(Notification $notification): void

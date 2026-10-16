@@ -2,12 +2,7 @@
 
 namespace App\Filament\Resources\Sites\Pages;
 
-use App\Filament\Resources\Sites\ForgeSyncNotification;
 use App\Filament\Resources\Sites\SiteResource;
-use App\Jobs\SyncForgeDomainsJob;
-use App\Models\Site;
-use App\Services\Forge\ForgeDomainProvisioner;
-use App\Services\Forge\ForgeSyncInProgress;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Forms\Components\FileUpload;
@@ -15,7 +10,6 @@ use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
 use Filament\Support\Icons\Heroicon;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
@@ -104,122 +98,7 @@ class ListSites extends ListRecords
                         Storage::disk('local')->delete($path);
                     }
                 }),
-            Action::make('refreshForgeStatus')
-                ->label('Refresh Forge status')
-                ->icon(Heroicon::OutlinedArrowPath)
-                ->color('gray')
-                ->visible(fn (): bool => (bool) Auth::user()?->isAdmin() && app(ForgeDomainProvisioner::class)->isConfigured())
-                ->tooltip('The Forge and SSL columns are cached for up to an hour. This re-reads them from Forge.')
-                ->action(function (): void {
-                    app(ForgeDomainProvisioner::class)->forgetSnapshot();
-
-                    Notification::make()->title('Forge status refreshed')->success()->send();
-                }),
-            Action::make('syncForgeDomains')
-                ->label('Sync Domains to Forge')
-                ->icon(Heroicon::OutlinedShieldCheck)
-                ->color('gray')
-                ->visible(fn (): bool => (bool) Auth::user()?->isAdmin())
-                ->schema([
-                    Toggle::make('dry_run')
-                        ->label('Dry run only')
-                        ->default(true)
-                        ->helperText('Preview what would be added in Forge without creating domains or certificates.'),
-                    Toggle::make('skip_certificates')
-                        ->label('Skip SSL certificate requests')
-                        ->default(false)
-                        ->helperText('Adds missing domains only, without requesting Let\'s Encrypt certificates.'),
-                    Toggle::make('with_inactive')
-                        ->label('Include inactive sites')
-                        ->default(false),
-                ])
-                ->requiresConfirmation()
-                ->modalHeading('Sync domains to Forge')
-                ->modalDescription('Push site domains to Forge and optionally request Let\'s Encrypt certificates for them.')
-                ->action(fn (array $data) => $this->syncForge(
-                    dryRun: (bool) ($data['dry_run'] ?? true),
-                    requestCertificates: ! (bool) ($data['skip_certificates'] ?? false),
-                    withInactive: (bool) ($data['with_inactive'] ?? false),
-                )),
             CreateAction::make(),
         ];
-    }
-
-    private function syncForge(bool $dryRun, bool $requestCertificates = true, bool $withInactive = false): void
-    {
-        $provisioner = app(ForgeDomainProvisioner::class);
-
-        if (! $provisioner->isConfigured()) {
-            Notification::make()
-                ->title('Forge is not configured')
-                ->body('Set FORGE_API_TOKEN, FORGE_SERVER_ID and FORGE_SITE_ID.')
-                ->danger()
-                ->send();
-
-            return;
-        }
-
-        if (! $dryRun) {
-            $this->queueForgeSync($provisioner, $requestCertificates, $withInactive);
-
-            return;
-        }
-
-        $sites = Site::query()
-            ->when(! $withInactive, fn (Builder $query): Builder => $query->where('is_active', true))
-            ->get();
-
-        try {
-            $result = $provisioner->sync($sites, requestCertificates: $requestCertificates, dryRun: $dryRun);
-        } catch (ForgeSyncInProgress $exception) {
-            Notification::make()
-                ->title('Forge sync already running')
-                ->body(e($exception->getMessage()))
-                ->warning()
-                ->send();
-
-            return;
-        } catch (Throwable $exception) {
-            report($exception);
-
-            Notification::make()
-                ->title('Forge sync failed')
-                ->body(e($exception->getMessage()))
-                ->danger()
-                ->send();
-
-            return;
-        }
-
-        ForgeSyncNotification::make($result, $dryRun)->send();
-    }
-
-    /**
-     * A live sync runs on the queue, not in this request — see
-     * SyncForgeDomainsJob for why.
-     */
-    private function queueForgeSync(ForgeDomainProvisioner $provisioner, bool $requestCertificates, bool $withInactive): void
-    {
-        if ($provisioner->isSyncing()) {
-            Notification::make()
-                ->title('Forge sync already running')
-                ->body(e((new ForgeSyncInProgress)->getMessage()))
-                ->warning()
-                ->send();
-
-            return;
-        }
-
-        SyncForgeDomainsJob::dispatch(
-            withInactive: $withInactive,
-            requestCertificates: $requestCertificates,
-            notifyUserId: Auth::id(),
-        );
-
-        Notification::make()
-            ->title('Forge sync started')
-            ->body('It runs in the background and starts within a minute. The result will appear in your notifications (the bell icon) when it finishes.')
-            ->success()
-            ->send();
     }
 }

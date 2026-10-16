@@ -75,6 +75,15 @@ class SyncForgeDomains extends Command
             return self::FAILURE;
         }
 
+        if (! $dryRun) {
+            try {
+                $provisioner->recordStatuses($sites, fresh: true);
+            } catch (\Throwable $exception) {
+                report($exception);
+                $this->warn('Could not record the new Forge status on the sites: '.$exception->getMessage());
+            }
+        }
+
         if ($result['skipped_recent_failure'] > 0) {
             $this->warn("Skipped {$result['skipped_recent_failure']} certificate(s) that failed in the last hour; retry a single site with --site and --certificates-only once its DNS points here.");
         }

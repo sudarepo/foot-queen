@@ -2,7 +2,10 @@
 
 namespace App\Models;
 
+use App\Jobs\AddSiteToForge;
 use App\Services\DeviceDetector;
+use App\Services\Forge\ForgeDomainStatus;
+use App\Services\Forge\ForgeSslStatus;
 use App\Services\HomepageLayout;
 use App\Services\LegalPage;
 use Illuminate\Database\Eloquent\Builder;
@@ -53,6 +56,9 @@ class Site extends Model
         'is_active' => 'boolean',
         'home_layout_desktop' => HomepageLayout::class,
         'home_layout_mobile' => HomepageLayout::class,
+        'forge_domain_status' => ForgeDomainStatus::class,
+        'forge_ssl_status' => ForgeSslStatus::class,
+        'forge_checked_at' => 'datetime',
     ];
 
     protected static function booted(): void
@@ -82,6 +88,20 @@ class Site extends Model
             }
 
             static::flushRegistry();
+        });
+
+        /**
+         * A new domain is set up in Forge the moment it exists here — no
+         * separate sync step to remember. Queued, so a failure or a slow
+         * Forge never holds up saving the site; SSL follows on its own once
+         * the domain is in (AddSiteToForge → RequestSiteSsl).
+         */
+        static::created(fn (Site $site) => AddSiteToForge::queueFor($site));
+
+        static::updated(function (Site $site) {
+            if ($site->wasChanged('domains')) {
+                AddSiteToForge::queueFor($site);
+            }
         });
 
         static::deleted(fn () => static::flushRegistry());

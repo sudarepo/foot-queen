@@ -3,91 +3,81 @@
 namespace Tests\Feature;
 
 use App\Filament\Resources\Sites\Pages\ListSites;
+use App\Jobs\AddSiteToForge;
+use App\Jobs\CheckSiteForgeStatus;
+use App\Jobs\RequestSiteSsl;
 use App\Models\Site;
 use App\Models\User;
+use App\Services\Forge\ForgeDomainStatus;
+use App\Services\Forge\ForgeSslStatus;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
 use Tests\TestCase;
 
+/**
+ * The sites list shows the Forge status recorded on each site; drawing it
+ * never calls Forge, however many sites there are.
+ */
 class SitesForgeSslRetryTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_the_sites_list_shows_ssl_missing_when_the_certificate_is_not_provisioned(): void
+    protected function setUp(): void
     {
-        /** @var User $admin */
-        $admin = User::factory()->create(['is_admin' => true]);
+        parent::setUp();
+
+        // Creating a site queues its Forge provisioning; these tests drive
+        // Forge themselves, so those jobs are only recorded, not run.
+        Queue::fake([AddSiteToForge::class, RequestSiteSsl::class, CheckSiteForgeStatus::class]);
 
         config()->set('services.forge.base_url', 'https://forge.example.test/api/orgs/acme');
         config()->set('services.forge.token', 'forge-token');
         config()->set('services.forge.server_id', '10');
         config()->set('services.forge.site_id', '99');
+    }
 
-        Site::factory()->create([
-            'name' => 'SSL Missing Site',
-            'domains' => ['ssl-missing.example'],
-            'is_active' => true,
-        ]);
+    public function test_the_sites_list_shows_the_stored_forge_status_without_calling_forge(): void
+    {
+        /** @var User $admin */
+        $admin = User::factory()->create(['is_admin' => true]);
+        Http::fake();
 
-        Http::fake([
-            'https://forge.example.test/api/orgs/acme/servers/10/sites/99/domains?*' => Http::response([
-                'data' => [['id' => '1', 'type' => 'domainRecords', 'attributes' => ['name' => 'ssl-missing.example']]],
-            ], 200),
-            'https://forge.example.test/api/orgs/acme/servers/10/sites/99/certificates?*' => Http::response([
-                'data' => [],
-            ], 200),
-        ]);
+        $provisioned = Site::factory()->create(['name' => 'Done Site', 'domains' => ['done.example']]);
+        $issuing = Site::factory()->create(['name' => 'Issuing Site', 'domains' => ['issuing.example']]);
+        $failed = Site::factory()->create(['name' => 'Failed Site', 'domains' => ['failed.example']]);
+
+        Site::query()->whereKey($provisioned->id)->update(['forge_domain_status' => 'provisioned', 'forge_ssl_status' => 'installed']);
+        Site::query()->whereKey($issuing->id)->update(['forge_domain_status' => 'provisioned', 'forge_ssl_status' => 'in_progress']);
+        Site::query()->whereKey($failed->id)->update(['forge_domain_status' => 'provisioned', 'forge_ssl_status' => 'failed']);
 
         $this->actingAs($admin)
             ->get('/admin/sites')
             ->assertSuccessful()
-            ->assertSee('SSL', false)
-            ->assertSee('Missing', false)
-            ->assertSee('Retry SSL', false);
+            ->assertSee('Installed')
+            ->assertSee('In progress')
+            ->assertSee('Failed');
+
+        Http::assertNothingSent();
     }
 
-    public function test_the_sites_list_reads_forge_once_and_then_from_cache(): void
+    public function test_the_forge_sync_button_is_gone_from_the_sites_list(): void
     {
-        /** @var User $admin */
-        $admin = User::factory()->create(['is_admin' => true]);
-
-        config()->set('services.forge.base_url', 'https://forge.example.test/api/orgs/acme');
-        config()->set('services.forge.token', 'forge-token');
-        config()->set('services.forge.server_id', '10');
-        config()->set('services.forge.site_id', '99');
-
-        Site::factory()->count(3)->create(['is_active' => true]);
-
-        Http::fake([
-            'https://forge.example.test/api/orgs/acme/servers/10/sites/99/domains?*' => Http::response(['data' => []], 200),
-            'https://forge.example.test/api/orgs/acme/servers/10/sites/99/certificates?*' => Http::response(['data' => []], 200),
-        ]);
-
-        $this->actingAs($admin)->get('/admin/sites')->assertSuccessful();
-        $this->actingAs($admin)->get('/admin/sites')->assertSuccessful();
-
-        Http::assertSentCount(2);
-    }
-
-    public function test_refresh_forge_status_rereads_forge(): void
-    {
-        /** @var User $admin */
-        $admin = User::factory()->create(['is_admin' => true]);
-        $this->actingAs($admin);
-
-        config()->set('services.forge.base_url', 'https://forge.example.test/api/orgs/acme');
-        config()->set('services.forge.token', 'forge-token');
-        config()->set('services.forge.server_id', '10');
-        config()->set('services.forge.site_id', '99');
-
-        Cache::put('forge-domain-snapshot', ['domains' => [], 'certificates' => [], 'pending_certificates' => []], 3600);
+        $this->actingAs(User::factory()->create(['is_admin' => true]));
 
         Livewire::test(ListSites::class)
-            ->callAction('refreshForgeStatus')
-            ->assertNotified('Forge status refreshed');
+            ->assertActionDoesNotExist('syncForgeDomains')
+            ->assertActionDoesNotExist('refreshForgeStatus');
+    }
 
-        $this->assertNull(Cache::get('forge-domain-snapshot'));
+    public function test_a_new_site_shows_as_in_progress_straight_away(): void
+    {
+        $site = Site::factory()->create(['domains' => ['brand-new.example']]);
+
+        $site->refresh();
+
+        $this->assertSame(ForgeDomainStatus::InProgress, $site->forge_domain_status);
+        $this->assertSame(ForgeSslStatus::Queued, $site->forge_ssl_status);
     }
 }

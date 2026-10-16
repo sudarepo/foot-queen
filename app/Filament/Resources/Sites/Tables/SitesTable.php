@@ -2,49 +2,23 @@
 
 namespace App\Filament\Resources\Sites\Tables;
 
-use App\Filament\Resources\Sites\ForgeSyncNotification;
 use App\Models\Cam;
 use App\Models\Site;
 use App\Services\DeviceDetector;
-use App\Services\Forge\ForgeDomainProvisioner;
-use Filament\Actions\Action;
+use App\Services\Forge\ForgeDomainStatus;
+use App\Services\Forge\ForgeSslStatus;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\RestoreAction;
 use Filament\Actions\RestoreBulkAction;
-use Filament\Notifications\Notification;
-use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\TrashedFilter;
 use Filament\Tables\Table;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Str;
-use Throwable;
 
 class SitesTable
 {
-    private const FORGE_STATUS_PROVISIONED = 'Provisioned';
-
-    private const FORGE_STATUS_MISSING = 'Missing';
-
-    private const FORGE_STATUS_NOT_CONFIGURED = 'Not configured';
-
-    private const FORGE_STATUS_UNKNOWN = 'Unknown';
-
-    private const FORGE_STATUS_NO_DOMAIN = 'No domain';
-
-    private const FORGE_SSL_STATUS_PROVISIONED = 'Provisioned';
-
-    private const FORGE_SSL_STATUS_MISSING = 'Missing';
-
-    private const FORGE_SSL_STATUS_NOT_CONFIGURED = 'Not configured';
-
-    private const FORGE_SSL_STATUS_UNKNOWN = 'Unknown';
-
-    private const FORGE_SSL_STATUS_NO_DOMAIN = 'No domain';
-
     public static function configure(Table $table): Table
     {
         return $table
@@ -61,27 +35,24 @@ class SitesTable
                     ->listWithLineBreaks()
                     ->limitList(3),
 
-                TextColumn::make('forge_status')
+                /**
+                 * Recorded on the site by its provisioning job and the weekly
+                 * check (sites:check-forge-status) — drawing this list never
+                 * calls Forge.
+                 */
+                TextColumn::make('forge_domain_status')
                     ->label('Forge')
                     ->badge()
-                    ->state(fn (Site $record): string => self::forgeStatusFor($record))
-                    ->color(fn (string $state): string => match ($state) {
-                        self::FORGE_STATUS_PROVISIONED => 'success',
-                        self::FORGE_STATUS_MISSING => 'warning',
-                        self::FORGE_STATUS_UNKNOWN => 'danger',
-                        default => 'gray',
-                    }),
+                    ->formatStateUsing(fn (ForgeDomainStatus $state): string => $state->label())
+                    ->color(fn (ForgeDomainStatus $state): string => $state->color())
+                    ->tooltip(fn (Site $record): ?string => $record->forge_error),
 
                 TextColumn::make('forge_ssl_status')
                     ->label('SSL')
                     ->badge()
-                    ->state(fn (Site $record): string => self::forgeSslStatusFor($record))
-                    ->color(fn (string $state): string => match ($state) {
-                        self::FORGE_SSL_STATUS_PROVISIONED => 'success',
-                        self::FORGE_SSL_STATUS_MISSING => 'warning',
-                        self::FORGE_SSL_STATUS_UNKNOWN => 'danger',
-                        default => 'gray',
-                    }),
+                    ->formatStateUsing(fn (ForgeSslStatus $state): string => $state->label())
+                    ->color(fn (ForgeSslStatus $state): string => $state->color())
+                    ->tooltip(fn (Site $record): ?string => $record->forge_checked_at === null ? null : 'Checked '.$record->forge_checked_at->diffForHumans()),
 
                 TextColumn::make('tags')
                     ->label('Keywords')
@@ -127,31 +98,6 @@ class SitesTable
                 TrashedFilter::make(),
             ])
             ->recordActions([
-                Action::make('retrySsl')
-                    ->label('Retry SSL')
-                    ->icon(Heroicon::OutlinedArrowPath)
-                    ->color('gray')
-                    ->visible(fn (Site $record): bool => (bool) Auth::user()?->isAdmin() && self::forgeSslStatusFor($record) === self::FORGE_SSL_STATUS_MISSING)
-                    ->requiresConfirmation()
-                    ->modalHeading('Retry SSL certificate request')
-                    ->modalDescription('Requests Let\'s Encrypt certificates again for this site without re-adding its domains in Forge.')
-                    ->action(function (Site $record): void {
-                        try {
-                            $result = app(ForgeDomainProvisioner::class)->requestCertificates(collect([$record]), dryRun: false);
-                        } catch (Throwable $exception) {
-                            report($exception);
-
-                            Notification::make()
-                                ->title('SSL retry failed')
-                                ->body(e($exception->getMessage()))
-                                ->danger()
-                                ->send();
-
-                            return;
-                        }
-
-                        ForgeSyncNotification::make($result, dryRun: false)->send();
-                    }),
                 RestoreAction::make(),
                 EditAction::make()
                     ->hidden(fn (Site $record): bool => $record->trashed()),
@@ -162,111 +108,5 @@ class SitesTable
                     RestoreBulkAction::make(),
                 ]),
             ]);
-    }
-
-    private static function forgeStatusFor(Site $site): string
-    {
-        $domains = self::siteDomains($site);
-
-        if ($domains === []) {
-            return self::FORGE_STATUS_NO_DOMAIN;
-        }
-
-        $state = self::forgeDomainState();
-
-        if ($state['configured'] === false) {
-            return self::FORGE_STATUS_NOT_CONFIGURED;
-        }
-
-        if ($state['available'] === false) {
-            return self::FORGE_STATUS_UNKNOWN;
-        }
-
-        return collect($domains)
-            ->contains(fn (string $domain): bool => in_array($domain, $state['domains'], true))
-            ? self::FORGE_STATUS_PROVISIONED
-            : self::FORGE_STATUS_MISSING;
-    }
-
-    /**
-     * @return array{configured: bool, available: bool, domains: array<int, string>}
-     */
-    private static function forgeDomainState(): array
-    {
-        $state = self::forgeState();
-
-        return ['configured' => $state['configured'], 'available' => $state['available'], 'domains' => $state['domains']];
-    }
-
-    /**
-     * @return array{configured: bool, available: bool, certificates: array<int, string>}
-     */
-    private static function forgeCertificateState(): array
-    {
-        $state = self::forgeState();
-
-        return ['configured' => $state['configured'], 'available' => $state['available'], 'certificates' => $state['certificates']];
-    }
-
-    /**
-     * Read once per request from the provisioner's cached snapshot — never
-     * live per page load (see ForgeDomainProvisioner::snapshot()).
-     *
-     * @return array{configured: bool, available: bool, domains: array<int, string>, certificates: array<int, string>}
-     */
-    private static function forgeState(): array
-    {
-        return once(function (): array {
-            /** @var ForgeDomainProvisioner $provisioner */
-            $provisioner = app(ForgeDomainProvisioner::class);
-
-            if (! $provisioner->isConfigured()) {
-                return ['configured' => false, 'available' => false, 'domains' => [], 'certificates' => []];
-            }
-
-            try {
-                $snapshot = $provisioner->snapshot();
-
-                return ['configured' => true, 'available' => true, 'domains' => $snapshot['domains'], 'certificates' => $snapshot['certificates']];
-            } catch (Throwable) {
-                return ['configured' => true, 'available' => false, 'domains' => [], 'certificates' => []];
-            }
-        });
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private static function siteDomains(Site $site): array
-    {
-        return collect($site->domains ?? [])
-            ->map(fn (mixed $domain): ?string => is_string($domain) ? Str::lower(trim($domain)) : null)
-            ->filter(fn (?string $domain): bool => filled($domain))
-            ->values()
-            ->all();
-    }
-
-    private static function forgeSslStatusFor(Site $site): string
-    {
-        $domains = self::siteDomains($site);
-
-        if ($domains === []) {
-            return self::FORGE_SSL_STATUS_NO_DOMAIN;
-        }
-
-        $state = self::forgeCertificateState();
-
-        if ($state['configured'] === false) {
-            return self::FORGE_SSL_STATUS_NOT_CONFIGURED;
-        }
-
-        if ($state['available'] === false) {
-            return self::FORGE_SSL_STATUS_UNKNOWN;
-        }
-
-        return collect($domains)
-            ->contains(fn (string $domain): bool => in_array($domain, $state['certificates'], true))
-            ? self::FORGE_SSL_STATUS_PROVISIONED
-            : self::FORGE_SSL_STATUS_MISSING;
     }
 }

@@ -177,14 +177,18 @@ class FilamentAdminPanelTest extends TestCase
             ->assertDontSee('Import CSV', false);
     }
 
-    public function test_admins_can_see_the_forge_domain_sync_action(): void
+    /**
+     * Sites are set up in Forge when they're created, with a per-site redo on
+     * the edit page — there's no bulk sync button on the list any more.
+     */
+    public function test_admins_no_longer_get_a_bulk_forge_sync_action(): void
     {
         $admin = User::factory()->create(['is_admin' => true]);
 
         $this->actingAs($admin)
             ->get('/admin/sites')
             ->assertSuccessful()
-            ->assertSee('Sync Domains to Forge', false);
+            ->assertDontSee('Sync Domains to Forge', false);
     }
 
     public function test_site_managers_cannot_see_the_forge_domain_sync_action(): void

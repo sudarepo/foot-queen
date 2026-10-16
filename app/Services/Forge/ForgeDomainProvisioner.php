@@ -117,7 +117,7 @@ class ForgeDomainProvisioner
      * A failed read isn't cached, so Forge being briefly unreachable doesn't
      * pin an "unknown" status on the admin for an hour.
      *
-     * @return array{domains: array<int, string>, certificates: array<int, string>, pending_certificates: array<int, string>}
+     * @return array{domains: array<int, string>, certificates: array<int, string>, pending_certificates: array<int, string>, failed_certificates: array<int, string>}
      *
      * @throws \RuntimeException when Forge can't be read
      */
@@ -125,7 +125,7 @@ class ForgeDomainProvisioner
     {
         $cached = Cache::get(self::SNAPSHOT_CACHE_KEY);
 
-        if (is_array($cached) && isset($cached['domains'], $cached['certificates'], $cached['pending_certificates'])) {
+        if (is_array($cached) && isset($cached['domains'], $cached['certificates'], $cached['pending_certificates'], $cached['failed_certificates'])) {
             return $cached;
         }
 
@@ -139,6 +139,9 @@ class ForgeDomainProvisioner
                 ->keys()->values()->all(),
             'pending_certificates' => $certificates
                 ->reject(fn (array $certificate): bool => in_array($certificate['status'], ['installed', self::STATUS_FAILED], true))
+                ->keys()->values()->all(),
+            'failed_certificates' => $certificates
+                ->filter(fn (array $certificate): bool => $certificate['status'] === self::STATUS_FAILED)
                 ->keys()->values()->all(),
         ];
 
@@ -154,6 +157,96 @@ class ForgeDomainProvisioner
     public function forgetSnapshot(): void
     {
         Cache::forget(self::SNAPSHOT_CACHE_KEY);
+    }
+
+    /**
+     * Read where each site stands in Forge and store it on the row, which is
+     * what the admin shows. Written with a plain update, so recording a
+     * status never fires the model events that would provision the site.
+     *
+     * A domain is provisioned only when every one of the site's domains is
+     * in Forge, and SSL is installed only when each of those has an active
+     * certificate — a half-set-up site shows what's left to do.
+     *
+     * @param  Collection<int, Site>  $sites
+     * @param  array<int, string>  $errors  site id => why the last attempt failed
+     *
+     * @throws \RuntimeException when Forge can't be read
+     */
+    public function recordStatuses(Collection $sites, bool $fresh = false, array $errors = []): void
+    {
+        if ($fresh) {
+            $this->forgetSnapshot();
+        }
+
+        $snapshot = $this->snapshot();
+
+        foreach ($sites as $site) {
+            $domains = $this->siteDomains($site);
+            $error = $errors[$site->getKey()] ?? null;
+
+            [$domainStatus, $sslStatus] = $this->statusesFor($domains, $snapshot, $error !== null);
+
+            if ($domainStatus === ForgeDomainStatus::Provisioned && $sslStatus === ForgeSslStatus::Installed) {
+                $error = null;
+            }
+
+            Site::query()->whereKey($site->getKey())->update([
+                'forge_domain_status' => $domainStatus->value,
+                'forge_ssl_status' => $sslStatus->value,
+                'forge_error' => $error === null ? null : Str::limit($error, 495),
+                'forge_checked_at' => now(),
+            ]);
+        }
+    }
+
+    /**
+     * Record that work on a site is queued or under way, before the job
+     * doing it finishes — so the admin shows it straight away. A null leaves
+     * that status as it is.
+     */
+    public function markStatus(Site $site, ?ForgeDomainStatus $domain = null, ?ForgeSslStatus $ssl = null): void
+    {
+        Site::query()->whereKey($site->getKey())->update(array_filter([
+            'forge_domain_status' => $domain?->value,
+            'forge_ssl_status' => $ssl?->value,
+        ]) + ['forge_error' => null]);
+    }
+
+    /**
+     * @param  Collection<int, string>  $domains
+     * @param  array{domains: array<int, string>, certificates: array<int, string>, pending_certificates: array<int, string>, failed_certificates: array<int, string>}  $snapshot
+     * @return array{0: ForgeDomainStatus, 1: ForgeSslStatus}
+     */
+    private function statusesFor(Collection $domains, array $snapshot, bool $lastAttemptFailed): array
+    {
+        if ($domains->isEmpty()) {
+            return [ForgeDomainStatus::Missing, ForgeSslStatus::Missing];
+        }
+
+        $inForge = $domains->filter(fn (string $domain): bool => in_array($domain, $snapshot['domains'], true));
+
+        $domainStatus = match (true) {
+            $inForge->count() === $domains->count() => ForgeDomainStatus::Provisioned,
+            $lastAttemptFailed => ForgeDomainStatus::Failed,
+            default => ForgeDomainStatus::Missing,
+        };
+
+        if ($inForge->isEmpty()) {
+            return [$domainStatus, ForgeSslStatus::Missing];
+        }
+
+        $has = fn (string $list): bool => $inForge->contains(fn (string $domain): bool => in_array($domain, $snapshot[$list], true));
+
+        $sslStatus = match (true) {
+            $has('pending_certificates') => ForgeSslStatus::InProgress,
+            $domainStatus === ForgeDomainStatus::Provisioned
+                && $inForge->every(fn (string $domain): bool => in_array($domain, $snapshot['certificates'], true)) => ForgeSslStatus::Installed,
+            $has('failed_certificates') => ForgeSslStatus::Failed,
+            default => ForgeSslStatus::Missing,
+        };
+
+        return [$domainStatus, $sslStatus];
     }
 
     /**
