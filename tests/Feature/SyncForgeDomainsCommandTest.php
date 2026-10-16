@@ -438,6 +438,94 @@ class SyncForgeDomainsCommandTest extends TestCase
         Sleep::assertNeverSlept();
     }
 
+    /**
+     * Provisioned domains and installed certificates don't change between
+     * admin page loads; reading them live every time was several paginated
+     * API calls per load.
+     */
+    public function test_the_forge_snapshot_is_cached(): void
+    {
+        Http::fake([
+            self::BASE.'/domains?*' => Http::response($this->domainsPayload(['1' => 'cached.example'])),
+            self::BASE.'/certificates?*' => Http::response($this->certificatesPayload(['1' => 'installed'])),
+        ]);
+
+        $provisioner = app(ForgeDomainProvisioner::class);
+        $first = $provisioner->snapshot();
+        $second = $provisioner->snapshot();
+
+        $this->assertSame(['cached.example'], $first['domains']);
+        $this->assertSame(['cached.example'], $first['certificates']);
+        $this->assertSame($first, $second);
+        Http::assertSentCount(2);
+
+        $this->travel(59)->minutes();
+        $provisioner->snapshot();
+        Http::assertSentCount(2);
+
+        $this->travel(2)->minutes();
+        $provisioner->snapshot();
+        Http::assertSentCount(4);
+    }
+
+    public function test_the_snapshot_is_rechecked_soon_while_a_certificate_is_being_issued(): void
+    {
+        Http::fake([
+            self::BASE.'/domains?*' => Http::response($this->domainsPayload(['1' => 'issuing.example'])),
+            self::BASE.'/certificates?*' => Http::response($this->certificatesPayload(['1' => 'installing'])),
+        ]);
+
+        $provisioner = app(ForgeDomainProvisioner::class);
+
+        $this->assertSame(['issuing.example'], $provisioner->snapshot()['pending_certificates']);
+
+        $this->travel(2)->minutes();
+        $provisioner->snapshot();
+
+        Http::assertSentCount(4);
+    }
+
+    public function test_a_live_sync_clears_the_snapshot(): void
+    {
+        $site = Site::factory()->create(['domains' => ['new.example']]);
+
+        Http::fake([
+            self::BASE.'/domains?*' => Http::response($this->domainsPayload([])),
+            self::BASE.'/certificates?*' => Http::response($this->certificatesPayload([])),
+            self::BASE.'/domains' => Http::response(['data' => ['id' => '55', 'type' => 'domainRecords']], 201),
+        ]);
+
+        $provisioner = app(ForgeDomainProvisioner::class);
+        $provisioner->snapshot();
+        $provisioner->sync(collect([$site]), requestCertificates: false, dryRun: false);
+
+        $this->assertNull(Cache::get('forge-domain-snapshot'));
+    }
+
+    public function test_a_failed_read_is_not_cached(): void
+    {
+        Http::fake([
+            self::BASE.'/domains?*' => Http::sequence()
+                ->push(['message' => 'Server Error'], 500)
+                ->push(['message' => 'Server Error'], 500)
+                ->push(['message' => 'Server Error'], 500)
+                ->push(['message' => 'Server Error'], 500)
+                ->push($this->domainsPayload(['1' => 'back.example'])),
+            self::BASE.'/certificates?*' => Http::response($this->certificatesPayload([])),
+        ]);
+
+        $provisioner = app(ForgeDomainProvisioner::class);
+
+        try {
+            $provisioner->snapshot();
+            $this->fail('Expected Forge to be unreadable.');
+        } catch (\RuntimeException) {
+            // Expected.
+        }
+
+        $this->assertSame(['back.example'], $provisioner->snapshot()['domains']);
+    }
+
     public function test_it_follows_cursor_pagination(): void
     {
         Http::fake([

@@ -104,6 +104,17 @@ class ListSites extends ListRecords
                         Storage::disk('local')->delete($path);
                     }
                 }),
+            Action::make('refreshForgeStatus')
+                ->label('Refresh Forge status')
+                ->icon(Heroicon::OutlinedArrowPath)
+                ->color('gray')
+                ->visible(fn (): bool => (bool) Auth::user()?->isAdmin() && app(ForgeDomainProvisioner::class)->isConfigured())
+                ->tooltip('The Forge and SSL columns are cached for up to an hour. This re-reads them from Forge.')
+                ->action(function (): void {
+                    app(ForgeDomainProvisioner::class)->forgetSnapshot();
+
+                    Notification::make()->title('Forge status refreshed')->success()->send();
+                }),
             Action::make('syncForgeDomains')
                 ->label('Sync Domains to Forge')
                 ->icon(Heroicon::OutlinedShieldCheck)

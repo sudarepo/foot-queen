@@ -193,40 +193,9 @@ class SitesTable
      */
     private static function forgeDomainState(): array
     {
-        // Once per request, not once per process: a static would outlive the
-        // request in a long-running worker and between tests.
-        return once(fn (): array => self::fetchForgeDomainState());
-    }
+        $state = self::forgeState();
 
-    /**
-     * @return array{configured: bool, available: bool, domains: array<int, string>}
-     */
-    private static function fetchForgeDomainState(): array
-    {
-        /** @var ForgeDomainProvisioner $provisioner */
-        $provisioner = app(ForgeDomainProvisioner::class);
-
-        if (! $provisioner->isConfigured()) {
-            return [
-                'configured' => false,
-                'available' => false,
-                'domains' => [],
-            ];
-        }
-
-        try {
-            return [
-                'configured' => true,
-                'available' => true,
-                'domains' => $provisioner->existingDomains()->all(),
-            ];
-        } catch (Throwable) {
-            return [
-                'configured' => true,
-                'available' => false,
-                'domains' => [],
-            ];
-        }
+        return ['configured' => $state['configured'], 'available' => $state['available'], 'domains' => $state['domains']];
     }
 
     /**
@@ -234,38 +203,35 @@ class SitesTable
      */
     private static function forgeCertificateState(): array
     {
-        return once(fn (): array => self::fetchForgeCertificateState());
+        $state = self::forgeState();
+
+        return ['configured' => $state['configured'], 'available' => $state['available'], 'certificates' => $state['certificates']];
     }
 
     /**
-     * @return array{configured: bool, available: bool, certificates: array<int, string>}
+     * Read once per request from the provisioner's cached snapshot — never
+     * live per page load (see ForgeDomainProvisioner::snapshot()).
+     *
+     * @return array{configured: bool, available: bool, domains: array<int, string>, certificates: array<int, string>}
      */
-    private static function fetchForgeCertificateState(): array
+    private static function forgeState(): array
     {
-        /** @var ForgeDomainProvisioner $provisioner */
-        $provisioner = app(ForgeDomainProvisioner::class);
+        return once(function (): array {
+            /** @var ForgeDomainProvisioner $provisioner */
+            $provisioner = app(ForgeDomainProvisioner::class);
 
-        if (! $provisioner->isConfigured()) {
-            return [
-                'configured' => false,
-                'available' => false,
-                'certificates' => [],
-            ];
-        }
+            if (! $provisioner->isConfigured()) {
+                return ['configured' => false, 'available' => false, 'domains' => [], 'certificates' => []];
+            }
 
-        try {
-            return [
-                'configured' => true,
-                'available' => true,
-                'certificates' => $provisioner->existingCertificates()->all(),
-            ];
-        } catch (Throwable) {
-            return [
-                'configured' => true,
-                'available' => false,
-                'certificates' => [],
-            ];
-        }
+            try {
+                $snapshot = $provisioner->snapshot();
+
+                return ['configured' => true, 'available' => true, 'domains' => $snapshot['domains'], 'certificates' => $snapshot['certificates']];
+            } catch (Throwable) {
+                return ['configured' => true, 'available' => false, 'domains' => [], 'certificates' => []];
+            }
+        });
     }
 
     /**
