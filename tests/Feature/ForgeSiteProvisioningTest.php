@@ -6,6 +6,7 @@ use App\Jobs\AddSiteToForge;
 use App\Jobs\CheckSiteForgeStatus;
 use App\Jobs\RequestSiteSsl;
 use App\Models\Site;
+use App\Services\Forge\CloudflareDetector;
 use App\Services\Forge\ForgeDomainProvisioner;
 use App\Services\Forge\ForgeDomainStatus;
 use App\Services\Forge\ForgeSslStatus;
@@ -286,6 +287,87 @@ class ForgeSiteProvisioningTest extends TestCase
         $site->refresh();
         $this->assertSame(ForgeDomainStatus::Provisioned, $site->forge_domain_status);
         $this->assertSame(ForgeSslStatus::Failed, $site->forge_ssl_status);
+    }
+
+    /* ----------  Cloudflare  ---------- */
+
+    public function test_a_domain_is_proxied_only_when_every_address_is_cloudflares(): void
+    {
+        $detector = new CloudflareDetector(fn (string $domain): array => match ($domain) {
+            'proxied.example' => ['104.18.207.112', '104.18.208.112'],
+            'direct.example' => ['208.122.217.32'],
+            'mixed.example' => ['104.18.207.112', '208.122.217.32'],
+            default => [],
+        });
+
+        $this->assertTrue($detector->isProxied('proxied.example'));
+        $this->assertFalse($detector->isProxied('direct.example'));
+        $this->assertFalse($detector->isProxied('mixed.example'));
+        $this->assertFalse($detector->isProxied('unresolvable.example'));
+    }
+
+    public function test_no_certificate_is_requested_for_a_domain_behind_cloudflare(): void
+    {
+        Queue::fake([AddSiteToForge::class, RequestSiteSsl::class, CheckSiteForgeStatus::class]);
+        $this->behindCloudflare(['proxied.example']);
+        $site = Site::factory()->create(['domains' => ['proxied.example']]);
+
+        Http::fake([
+            self::BASE.'/domains?*' => Http::response($this->domainsPayload(['1' => 'proxied.example'])),
+            self::BASE.'/certificates?*' => Http::response($this->certificatesPayload(['1' => 'failed'])),
+        ]);
+
+        (new RequestSiteSsl($site->id))->handle(app(ForgeDomainProvisioner::class));
+
+        Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST');
+        $this->assertSame(ForgeSslStatus::Cloudflare, $site->refresh()->forge_ssl_status);
+        Queue::assertNotPushed(CheckSiteForgeStatus::class);
+    }
+
+    public function test_a_new_site_behind_cloudflare_never_queues_the_ssl_step(): void
+    {
+        Queue::fake([AddSiteToForge::class, RequestSiteSsl::class, CheckSiteForgeStatus::class]);
+        $this->behindCloudflare(['proxied.example']);
+        $site = Site::factory()->create(['domains' => ['proxied.example']]);
+
+        Http::fake([
+            self::BASE.'/domains?*' => Http::sequence()
+                ->push($this->domainsPayload([]))
+                ->push($this->domainsPayload(['55' => 'proxied.example'])),
+            self::BASE.'/certificates?*' => Http::response($this->certificatesPayload([])),
+            self::BASE.'/domains' => Http::response(['data' => ['id' => '55', 'type' => 'domainRecords']], 201),
+        ]);
+
+        (new AddSiteToForge($site->id))->handle(app(ForgeDomainProvisioner::class));
+
+        $this->assertSame(ForgeSslStatus::Cloudflare, $site->refresh()->forge_ssl_status);
+        Queue::assertNotPushed(RequestSiteSsl::class);
+    }
+
+    public function test_an_installed_certificate_still_reads_as_installed_behind_cloudflare(): void
+    {
+        Queue::fake([AddSiteToForge::class]);
+        $this->behindCloudflare(['proxied.example']);
+        $site = Site::factory()->create(['domains' => ['proxied.example']]);
+
+        Http::fake([
+            self::BASE.'/domains?*' => Http::response($this->domainsPayload(['1' => 'proxied.example'])),
+            self::BASE.'/certificates?*' => Http::response($this->certificatesPayload(['1' => 'installed'])),
+        ]);
+
+        app(ForgeDomainProvisioner::class)->recordStatuses(collect([$site]), fresh: true);
+
+        $this->assertSame(ForgeSslStatus::Installed, $site->refresh()->forge_ssl_status);
+    }
+
+    /**
+     * @param  array<int, string>  $domains
+     */
+    private function behindCloudflare(array $domains): void
+    {
+        $this->app->instance(CloudflareDetector::class, new CloudflareDetector(
+            fn (string $domain): array => in_array($domain, $domains, true) ? ['104.18.207.112'] : ['208.122.217.32'],
+        ));
     }
 
     /* ----------  Weekly check  ---------- */

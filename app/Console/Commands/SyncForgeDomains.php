@@ -84,6 +84,10 @@ class SyncForgeDomains extends Command
             }
         }
 
+        if ($result['skipped_cloudflare'] > 0) {
+            $this->line("Skipped {$result['skipped_cloudflare']} certificate(s) for domains behind Cloudflare, which serves their HTTPS.");
+        }
+
         if ($result['skipped_recent_failure'] > 0) {
             $this->warn("Skipped {$result['skipped_recent_failure']} certificate(s) that failed in the last hour; retry a single site with --site and --certificates-only once its DNS points here.");
         }

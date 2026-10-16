@@ -82,7 +82,7 @@ class AddSiteToForge implements ShouldBeUnique, ShouldQueue, ShouldQueueAfterCom
 
         $site->refresh();
 
-        if ($site->forge_domain_status === ForgeDomainStatus::Provisioned && $site->forge_ssl_status !== ForgeSslStatus::Installed) {
+        if ($site->forge_domain_status === ForgeDomainStatus::Provisioned && ! $site->forge_ssl_status->isSecured()) {
             RequestSiteSsl::queueFor($site);
         }
     }

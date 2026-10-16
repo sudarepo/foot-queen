@@ -124,6 +124,6 @@ class EditSite extends EditRecord
         }
 
         return $site->forge_domain_status !== ForgeDomainStatus::Provisioned
-            || $site->forge_ssl_status !== ForgeSslStatus::Installed;
+            || ! $site->forge_ssl_status->isSecured();
     }
 }

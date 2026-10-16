@@ -70,6 +70,8 @@ class ForgeDomainProvisioner
     /** While Forge is still issuing a certificate, check back soon. */
     private const SNAPSHOT_PENDING_TTL_SECONDS = 60;
 
+    public function __construct(private CloudflareDetector $cloudflare) {}
+
     public function isConfigured(): bool
     {
         return filled($this->token())
@@ -87,7 +89,7 @@ class ForgeDomainProvisioner
      * and a live sync refuses to start while another is running.
      *
      * @param  Collection<int, Site>  $sites
-     * @return array{added:int, skipped_existing_domain:int, requested_certificates:int, skipped_existing_certificate:int, skipped_recent_failure:int, failures:int, operations:array<int, array{domain:string, action:string, status:string, error:?string}>}
+     * @return array{added:int, skipped_existing_domain:int, requested_certificates:int, skipped_existing_certificate:int, skipped_recent_failure:int, skipped_cloudflare:int, failures:int, operations:array<int, array{domain:string, action:string, status:string, error:?string}>}
      *
      * @throws ForgeSyncInProgress
      */
@@ -242,6 +244,8 @@ class ForgeDomainProvisioner
             $has('pending_certificates') => ForgeSslStatus::InProgress,
             $domainStatus === ForgeDomainStatus::Provisioned
                 && $inForge->every(fn (string $domain): bool => in_array($domain, $snapshot['certificates'], true)) => ForgeSslStatus::Installed,
+            $domainStatus === ForgeDomainStatus::Provisioned
+                && $inForge->every(fn (string $domain): bool => in_array($domain, $snapshot['certificates'], true) || $this->cloudflare->isProxied($domain)) => ForgeSslStatus::Cloudflare,
             $has('failed_certificates') => ForgeSslStatus::Failed,
             default => ForgeSslStatus::Missing,
         };
@@ -267,7 +271,7 @@ class ForgeDomainProvisioner
 
     /**
      * @param  Collection<int, Site>  $sites
-     * @return array{added:int, skipped_existing_domain:int, requested_certificates:int, skipped_existing_certificate:int, skipped_recent_failure:int, failures:int, operations:array<int, array{domain:string, action:string, status:string, error:?string}>}
+     * @return array{added:int, skipped_existing_domain:int, requested_certificates:int, skipped_existing_certificate:int, skipped_recent_failure:int, skipped_cloudflare:int, failures:int, operations:array<int, array{domain:string, action:string, status:string, error:?string}>}
      */
     private function runSync(Collection $sites, bool $requestCertificates, bool $dryRun, bool $requestDomains, bool $retryRecentFailures): array
     {
@@ -280,6 +284,7 @@ class ForgeDomainProvisioner
             'requested_certificates' => 0,
             'skipped_existing_certificate' => 0,
             'skipped_recent_failure' => 0,
+            'skipped_cloudflare' => 0,
             'failures' => 0,
             'operations' => [],
         ];
@@ -320,6 +325,14 @@ class ForgeDomainProvisioner
                 }
 
                 $certificate = $certificates->get($domain);
+
+                // Cloudflare already serves HTTPS for it, and Let's Encrypt
+                // can't issue one here — asking only costs a failed request.
+                if ($this->cloudflare->isProxied($domain) && ($certificate === null || $certificate['status'] === self::STATUS_FAILED)) {
+                    $summary['skipped_cloudflare']++;
+
+                    continue;
+                }
 
                 if ($certificate !== null && $certificate['status'] !== self::STATUS_FAILED) {
                     $summary['skipped_existing_certificate']++;
@@ -439,7 +452,7 @@ class ForgeDomainProvisioner
 
     /**
      * @param  Collection<int, Site>  $sites
-     * @return array{added:int, skipped_existing_domain:int, requested_certificates:int, skipped_existing_certificate:int, skipped_recent_failure:int, failures:int, operations:array<int, array{domain:string, action:string, status:string, error:?string}>}
+     * @return array{added:int, skipped_existing_domain:int, requested_certificates:int, skipped_existing_certificate:int, skipped_recent_failure:int, skipped_cloudflare:int, failures:int, operations:array<int, array{domain:string, action:string, status:string, error:?string}>}
      */
     public function requestCertificates(Collection $sites, bool $dryRun): array
     {

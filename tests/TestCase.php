@@ -3,6 +3,7 @@
 namespace Tests;
 
 use App\Models\Site;
+use App\Services\Forge\CloudflareDetector;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 
 abstract class TestCase extends BaseTestCase
@@ -18,5 +19,9 @@ abstract class TestCase extends BaseTestCase
         parent::setUp();
 
         Site::flushRegistry();
+
+        // No real DNS lookups from tests; a test that needs a domain to read
+        // as Cloudflare-proxied binds its own resolver.
+        $this->app->instance(CloudflareDetector::class, new CloudflareDetector(fn (string $domain): array => []));
     }
 }
