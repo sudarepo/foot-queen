@@ -451,14 +451,14 @@ class CamProfilePageTest extends TestCase
     }
 
     /**
-     * The feed's explicit "Join the room" button is a decision already made —
-     * it stays a one-click path out, unlike the card itself.
+     * The feed's "Join the room" button sends visitors to the performer's
+     * page on our site rather than straight out to Chaturbate.
      */
-    public function test_the_feed_cta_still_links_straight_out(): void
+    public function test_the_feed_cta_links_to_the_profile_page(): void
     {
         $cam = Cam::factory()->create(['username' => 'anna', 'is_online' => true]);
 
         $this->get('/feed')
-            ->assertSee(e(route('cams.redirect', [$cam, 'src' => 'feed'])), false);
+            ->assertDontSee(e(route('cams.redirect', [$cam, 'src' => 'feed'])), false);
     }
 }

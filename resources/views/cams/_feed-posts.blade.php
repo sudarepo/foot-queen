@@ -22,9 +22,8 @@
             <span class="ig-post__live"><span class="live-dot"></span> LIVE</span>
         </header>
 
-        {{-- The thumbnail opens the performer's page on our site; the "Join
-             the room" CTA below stays a direct outbound link, so anyone who
-             has already decided still gets there in one click. --}}
+        {{-- The thumbnail and the "Join the room" CTA below both open the
+             performer's page on our site; the outbound click happens there. --}}
         <a href="{{ route('cams.show', ['cam' => $cam->username, 'from' => 'feed']) }}"
            class="ig-post__media"
            @if ($cam->embed_url) data-preview-video-url="https://thumb.live.mmcdn.com/roomad/{{ $cam->username }}.mp4" @endif>
@@ -54,10 +53,8 @@
             @endforeach
         </p>
 
-        <a href="{{ route('cams.redirect', [$cam, 'src' => 'feed']) }}"
-           class="ig-post__cta"
-           target="_blank"
-           rel="noopener nofollow">
+        <a href="{{ route('cams.show', ['cam' => $cam->username, 'from' => 'feed']) }}"
+           class="ig-post__cta">
             Join the room &rarr;
         </a>
     </article>
