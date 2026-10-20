@@ -15,7 +15,7 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Tools\Annotations\IsOpenWorld;
 use Throwable;
 
-#[Description('Add site domains to Laravel Forge and/or request Let\'s Encrypt certificates — the same as `php artisan sites:sync-forge-domains`. Defaults to a dry run; call again with dry_run=false to apply — the live sync is queued and runs in the background. DNS must already point at the server for SSL to succeed.')]
+#[Description('Add site domains to Laravel Forge and/or request Let\'s Encrypt certificates — the same as `php artisan sites:sync-forge-domains`. Defaults to a dry run; call again with dry_run=false to apply — the live sync is queued and runs in the background. DNS must already point at the server for SSL to succeed. Naming one site makes it an explicit retry, like the admin\'s "Retry SSL": it also requests certificates for domains behind Cloudflare and ones that failed in the last hour, which a sync of every site skips.')]
 #[IsOpenWorld]
 class SyncForgeDomains extends AdminTool
 {
@@ -45,6 +45,7 @@ class SyncForgeDomains extends AdminTool
         }
 
         $dryRun = $validated['dry_run'] ?? true;
+        $isSingleSite = filled($validated['site'] ?? null);
 
         if (! $dryRun) {
             // Run from this request, the PHP-FPM reloads each new certificate
@@ -58,6 +59,7 @@ class SyncForgeDomains extends AdminTool
                 requestDomains: $validated['request_domains'] ?? true,
                 requestCertificates: $validated['request_certificates'] ?? true,
                 notifyUserId: $request->user()?->getKey(),
+                retryRecentFailures: $isSingleSite,
             );
 
             return Response::json([
@@ -73,6 +75,7 @@ class SyncForgeDomains extends AdminTool
                 requestCertificates: $validated['request_certificates'] ?? true,
                 dryRun: true,
                 requestDomains: $validated['request_domains'] ?? true,
+                retryRecentFailures: $isSingleSite,
             );
         } catch (Throwable $exception) {
             report($exception);

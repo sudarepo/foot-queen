@@ -198,6 +198,28 @@ class SyncForgeDomainsCommandTest extends TestCase
             && $request->url() === self::BASE.'/domains');
     }
 
+    public function test_a_site_can_be_picked_by_its_id(): void
+    {
+        $site = Site::factory()->create([
+            'slug' => 'by-id-site',
+            'domains' => ['by-id.example'],
+            'is_active' => true,
+        ]);
+
+        Http::fake([
+            self::BASE.'/domains?*' => Http::response($this->domainsPayload(['7' => 'by-id.example'])),
+            self::BASE.'/certificates?*' => Http::response($this->certificatesPayload([])),
+            self::BASE.'/domains/7/certificates' => Http::response(['data' => ['id' => '901', 'type' => 'certificates']], 201),
+        ]);
+
+        $this->artisan('sites:sync-forge-domains', [
+            '--site' => (string) $site->id,
+            '--certificates-only' => true,
+        ])
+            ->expectsOutputToContain('by-id.example: certificate request submitted')
+            ->assertExitCode(0);
+    }
+
     public function test_certificate_retry_fails_when_the_domain_is_not_in_forge(): void
     {
         Site::factory()->create([

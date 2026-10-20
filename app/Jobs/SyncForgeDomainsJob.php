@@ -41,6 +41,7 @@ class SyncForgeDomainsJob implements ShouldBeUnique, ShouldQueue
 
     /**
      * @param  array<int, int>|null  $siteIds  null for every site (active only unless $withInactive)
+     * @param  bool  $retryRecentFailures  an explicit request for one site: retry a fresh failure and try domains behind Cloudflare
      */
     public function __construct(
         public ?array $siteIds = null,
@@ -48,6 +49,7 @@ class SyncForgeDomainsJob implements ShouldBeUnique, ShouldQueue
         public bool $requestDomains = true,
         public bool $requestCertificates = true,
         public ?int $notifyUserId = null,
+        public bool $retryRecentFailures = false,
     ) {}
 
     public function uniqueId(): string
@@ -68,6 +70,7 @@ class SyncForgeDomainsJob implements ShouldBeUnique, ShouldQueue
                 requestCertificates: $this->requestCertificates,
                 dryRun: false,
                 requestDomains: $this->requestDomains,
+                retryRecentFailures: $this->retryRecentFailures,
             );
         } catch (ForgeSyncInProgress $exception) {
             $this->notify(Notification::make()->title('Forge sync already running')->body(e($exception->getMessage()))->warning());

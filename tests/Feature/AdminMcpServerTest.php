@@ -494,7 +494,45 @@ class AdminMcpServerTest extends TestCase
             ->assertSee('queued');
 
         Queue::assertPushed(SyncForgeDomainsJob::class, fn (SyncForgeDomainsJob $job): bool => $job->siteIds === [$site->id]
-            && $job->notifyUserId === $user->id);
+            && $job->notifyUserId === $user->id
+            && $job->retryRecentFailures);
+    }
+
+    public function test_a_live_forge_sync_of_every_site_is_not_an_explicit_retry(): void
+    {
+        Queue::fake();
+        Site::factory()->create();
+
+        $this->mock(ForgeDomainProvisioner::class, function ($mock) {
+            $mock->shouldReceive('isConfigured')->andReturnTrue();
+            $mock->shouldReceive('isSyncing')->andReturnFalse();
+        });
+
+        AdminServer::actingAs(User::factory()->create())
+            ->tool(SyncForgeDomains::class, ['dry_run' => false])
+            ->assertOk();
+
+        Queue::assertPushed(SyncForgeDomainsJob::class, fn (SyncForgeDomainsJob $job): bool => ! $job->retryRecentFailures);
+    }
+
+    public function test_a_dry_run_for_one_site_is_an_explicit_retry(): void
+    {
+        $site = Site::factory()->create();
+
+        $this->mock(ForgeDomainProvisioner::class, function ($mock) {
+            $mock->shouldReceive('isConfigured')->andReturnTrue();
+            $mock->shouldReceive('sync')
+                ->withArgs(fn ($sites, $requestCertificates, $dryRun, $requestDomains, $retryRecentFailures): bool => $dryRun && $retryRecentFailures)
+                ->once()
+                ->andReturn([
+                    'added' => 0, 'skipped_existing_domain' => 0, 'requested_certificates' => 1, 'skipped_existing_certificate' => 0,
+                    'skipped_recent_failure' => 0, 'skipped_cloudflare' => 0, 'failures' => 0, 'operations' => [],
+                ]);
+        });
+
+        AdminServer::actingAs(User::factory()->create())
+            ->tool(SyncForgeDomains::class, ['site' => $site->id])
+            ->assertOk();
     }
 
     /* ----------  Token commands  ---------- */

@@ -8,6 +8,7 @@ use App\Jobs\RequestSiteSsl;
 use App\Jobs\SyncForgeDomainsJob;
 use App\Models\Site;
 use App\Models\User;
+use App\Services\Forge\CloudflareDetector;
 use App\Services\Forge\ForgeDomainProvisioner;
 use App\Services\Forge\ForgeDomainStatus;
 use App\Services\Forge\ForgeSslStatus;
@@ -83,6 +84,37 @@ class SitesForgeSyncActionTest extends TestCase
         $this->assertSame(ForgeSslStatus::Installed, $done->forge_ssl_status);
         $this->assertSame(ForgeSslStatus::InProgress, $issuing->refresh()->forge_ssl_status);
         Queue::assertPushed(CheckSiteForgeStatus::class, fn (CheckSiteForgeStatus $job): bool => $job->siteId === $issuing->id);
+    }
+
+    public function test_an_explicit_retry_requests_a_certificate_for_a_domain_behind_cloudflare(): void
+    {
+        $this->app->instance(CloudflareDetector::class, new CloudflareDetector(fn (string $domain): array => ['104.18.207.112']));
+        $site = Site::factory()->create(['domains' => ['proxied.example'], 'is_active' => true]);
+
+        Http::fake([
+            self::BASE.'/domains?*' => Http::response($this->domainsPayload(['1' => 'proxied.example'])),
+            self::BASE.'/certificates?*' => Http::response($this->certificatesPayload([])),
+            self::BASE.'/domains/1/certificates' => Http::response(['data' => ['id' => '900']], 201),
+        ]);
+
+        SyncForgeDomainsJob::dispatchSync(siteIds: [$site->id], requestDomains: false, retryRecentFailures: true);
+
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'POST' && $request->url() === self::BASE.'/domains/1/certificates');
+    }
+
+    public function test_a_sync_that_is_not_a_retry_skips_a_domain_behind_cloudflare(): void
+    {
+        $this->app->instance(CloudflareDetector::class, new CloudflareDetector(fn (string $domain): array => ['104.18.207.112']));
+        $site = Site::factory()->create(['domains' => ['proxied.example'], 'is_active' => true]);
+
+        Http::fake([
+            self::BASE.'/domains?*' => Http::response($this->domainsPayload(['1' => 'proxied.example'])),
+            self::BASE.'/certificates?*' => Http::response($this->certificatesPayload([])),
+        ]);
+
+        SyncForgeDomainsJob::dispatchSync(siteIds: [$site->id], requestDomains: false);
+
+        Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST');
     }
 
     public function test_the_queued_sync_says_when_forge_is_up_to_date(): void
