@@ -40,7 +40,7 @@ class SyncForgeDomains extends Command
         if (is_string($siteOption) && filled($siteOption)) {
             $query->where(function (Builder $sites) use ($siteOption): void {
                 if (ctype_digit($siteOption)) {
-                    $sites->orWhereKey((int) $siteOption);
+                    $sites->orWhere($sites->getModel()->getQualifiedKeyName(), (int) $siteOption);
                 }
 
                 $sites->orWhere('slug', $siteOption);
