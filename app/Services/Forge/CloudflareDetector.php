@@ -9,10 +9,11 @@ use Symfony\Component\HttpFoundation\IpUtils;
  * Whether a domain is proxied through Cloudflare, judged by where its DNS
  * points.
  *
- * Cloudflare serves HTTPS for those with its own edge certificate, so they
- * work without one from Let's Encrypt — and Let's Encrypt can't issue one
- * here for them anyway. Every request for one fails, and every failed
- * attempt is a wasted request and a reload, so the sync skips them.
+ * Cloudflare serves visitors its own edge certificate, but unless the zone's
+ * SSL mode is "Flexible" it still connects to this server over HTTPS, which
+ * needs a certificate here too. Whether Let's Encrypt can issue one through
+ * the proxy depends on the zone's settings, so a bulk sync skips them and
+ * leaves it to an explicit per-site request.
  */
 class CloudflareDetector
 {

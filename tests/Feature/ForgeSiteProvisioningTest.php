@@ -306,7 +306,7 @@ class ForgeSiteProvisioningTest extends TestCase
         $this->assertFalse($detector->isProxied('unresolvable.example'));
     }
 
-    public function test_no_certificate_is_requested_for_a_domain_behind_cloudflare(): void
+    public function test_a_bulk_sync_requests_no_certificate_for_a_domain_behind_cloudflare(): void
     {
         Queue::fake([AddSiteToForge::class, RequestSiteSsl::class, CheckSiteForgeStatus::class]);
         $this->behindCloudflare(['proxied.example']);
@@ -314,17 +314,37 @@ class ForgeSiteProvisioningTest extends TestCase
 
         Http::fake([
             self::BASE.'/domains?*' => Http::response($this->domainsPayload(['1' => 'proxied.example'])),
-            self::BASE.'/certificates?*' => Http::response($this->certificatesPayload(['1' => 'failed'])),
+            self::BASE.'/certificates?*' => Http::response($this->certificatesPayload([])),
+        ]);
+
+        $result = app(ForgeDomainProvisioner::class)->sync(collect([$site]), requestCertificates: true, dryRun: false);
+
+        Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST');
+        $this->assertSame(1, $result['skipped_cloudflare']);
+    }
+
+    public function test_the_ssl_step_requests_a_certificate_for_a_domain_behind_cloudflare(): void
+    {
+        Queue::fake([AddSiteToForge::class, RequestSiteSsl::class, CheckSiteForgeStatus::class]);
+        $this->behindCloudflare(['proxied.example']);
+        $site = Site::factory()->create(['domains' => ['proxied.example']]);
+
+        Http::fake([
+            self::BASE.'/domains?*' => Http::response($this->domainsPayload(['1' => 'proxied.example'])),
+            self::BASE.'/certificates?*' => Http::sequence()
+                ->push($this->certificatesPayload(['1' => 'failed']))
+                ->push($this->certificatesPayload(['1' => 'installing'])),
+            self::BASE.'/domains/1/certificates' => Http::response(['data' => ['id' => '900']], 201),
         ]);
 
         (new RequestSiteSsl($site->id))->handle(app(ForgeDomainProvisioner::class));
 
-        Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST');
-        $this->assertSame(ForgeSslStatus::Cloudflare, $site->refresh()->forge_ssl_status);
-        Queue::assertNotPushed(CheckSiteForgeStatus::class);
+        Http::assertSent(fn (Request $request): bool => $request->method() === 'POST' && $request->url() === self::BASE.'/domains/1/certificates');
+        $this->assertSame(ForgeSslStatus::InProgress, $site->refresh()->forge_ssl_status);
+        Queue::assertPushed(CheckSiteForgeStatus::class);
     }
 
-    public function test_a_new_site_behind_cloudflare_never_queues_the_ssl_step(): void
+    public function test_a_new_site_behind_cloudflare_still_queues_the_ssl_step(): void
     {
         Queue::fake([AddSiteToForge::class, RequestSiteSsl::class, CheckSiteForgeStatus::class]);
         $this->behindCloudflare(['proxied.example']);
@@ -340,8 +360,40 @@ class ForgeSiteProvisioningTest extends TestCase
 
         (new AddSiteToForge($site->id))->handle(app(ForgeDomainProvisioner::class));
 
+        $this->assertFalse(ForgeSslStatus::Cloudflare->isSecured());
+        Queue::assertPushed(RequestSiteSsl::class, fn (RequestSiteSsl $job): bool => $job->siteId === $site->id);
+    }
+
+    public function test_a_domain_behind_cloudflare_with_no_certificate_reads_as_cloudflare(): void
+    {
+        Queue::fake([AddSiteToForge::class]);
+        $this->behindCloudflare(['proxied.example']);
+        $site = Site::factory()->create(['domains' => ['proxied.example']]);
+
+        Http::fake([
+            self::BASE.'/domains?*' => Http::response($this->domainsPayload(['1' => 'proxied.example'])),
+            self::BASE.'/certificates?*' => Http::response($this->certificatesPayload([])),
+        ]);
+
+        app(ForgeDomainProvisioner::class)->recordStatuses(collect([$site]), fresh: true);
+
         $this->assertSame(ForgeSslStatus::Cloudflare, $site->refresh()->forge_ssl_status);
-        Queue::assertNotPushed(RequestSiteSsl::class);
+    }
+
+    public function test_a_failed_certificate_behind_cloudflare_reads_as_failed(): void
+    {
+        Queue::fake([AddSiteToForge::class]);
+        $this->behindCloudflare(['proxied.example']);
+        $site = Site::factory()->create(['domains' => ['proxied.example']]);
+
+        Http::fake([
+            self::BASE.'/domains?*' => Http::response($this->domainsPayload(['1' => 'proxied.example'])),
+            self::BASE.'/certificates?*' => Http::response($this->certificatesPayload(['1' => 'failed'])),
+        ]);
+
+        app(ForgeDomainProvisioner::class)->recordStatuses(collect([$site]), fresh: true);
+
+        $this->assertSame(ForgeSslStatus::Failed, $site->refresh()->forge_ssl_status);
     }
 
     public function test_an_installed_certificate_still_reads_as_installed_behind_cloudflare(): void

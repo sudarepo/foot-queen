@@ -244,9 +244,9 @@ class ForgeDomainProvisioner
             $has('pending_certificates') => ForgeSslStatus::InProgress,
             $domainStatus === ForgeDomainStatus::Provisioned
                 && $inForge->every(fn (string $domain): bool => in_array($domain, $snapshot['certificates'], true)) => ForgeSslStatus::Installed,
+            $has('failed_certificates') => ForgeSslStatus::Failed,
             $domainStatus === ForgeDomainStatus::Provisioned
                 && $inForge->every(fn (string $domain): bool => in_array($domain, $snapshot['certificates'], true) || $this->cloudflare->isProxied($domain)) => ForgeSslStatus::Cloudflare,
-            $has('failed_certificates') => ForgeSslStatus::Failed,
             default => ForgeSslStatus::Missing,
         };
 
@@ -326,9 +326,11 @@ class ForgeDomainProvisioner
 
                 $certificate = $certificates->get($domain);
 
-                // Cloudflare already serves HTTPS for it, and Let's Encrypt
-                // can't issue one here — asking only costs a failed request.
-                if ($this->cloudflare->isProxied($domain) && ($certificate === null || $certificate['status'] === self::STATUS_FAILED)) {
+                // A bulk sync leaves Cloudflare domains alone: whether Let's
+                // Encrypt can reach them depends on the zone's settings, and a
+                // burst of failed requests costs reloads. Asking for one site
+                // (retryRecentFailures) always tries.
+                if (! $retryRecentFailures && $this->cloudflare->isProxied($domain) && ($certificate === null || $certificate['status'] === self::STATUS_FAILED)) {
                     $summary['skipped_cloudflare']++;
 
                     continue;
