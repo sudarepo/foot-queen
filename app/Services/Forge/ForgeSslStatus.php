@@ -21,16 +21,20 @@ enum ForgeSslStatus: string
 
     case Installed = 'installed';
 
-    /** Proxied through Cloudflare, which serves HTTPS with its own certificate. */
+    /**
+     * Proxied through Cloudflare, with no certificate on the server yet.
+     * Visitors only get HTTPS if the zone's SSL mode is "Flexible"; under
+     * "Full" Cloudflare can't reach the server over HTTPS at all.
+     */
     case Cloudflare = 'cloudflare';
 
     /** Let's Encrypt refused it — usually DNS not pointing at the server. */
     case Failed = 'failed';
 
-    /** HTTPS works for visitors, one way or the other — nothing to request. */
+    /** The server has a certificate for every domain — nothing to request. */
     public function isSecured(): bool
     {
-        return $this === self::Installed || $this === self::Cloudflare;
+        return $this === self::Installed;
     }
 
     public function label(): string
@@ -41,7 +45,7 @@ enum ForgeSslStatus: string
             self::Queued => 'Queued',
             self::InProgress => 'In progress',
             self::Installed => 'Installed',
-            self::Cloudflare => 'Cloudflare',
+            self::Cloudflare => 'Cloudflare (no certificate)',
             self::Failed => 'Failed',
         };
     }
@@ -49,9 +53,9 @@ enum ForgeSslStatus: string
     public function color(): string
     {
         return match ($this) {
-            self::Installed, self::Cloudflare => 'success',
+            self::Installed => 'success',
             self::InProgress, self::Queued => 'info',
-            self::Missing => 'warning',
+            self::Missing, self::Cloudflare => 'warning',
             self::Failed => 'danger',
             self::Unknown => 'gray',
         };

@@ -71,6 +71,18 @@ class EditSiteForgeActionsTest extends TestCase
         $this->assertSame(ForgeSslStatus::Queued, $site->refresh()->forge_ssl_status);
     }
 
+    public function test_retry_ssl_is_offered_for_a_site_behind_cloudflare_with_no_certificate(): void
+    {
+        $site = $this->siteWithStatus(ForgeDomainStatus::Provisioned, ForgeSslStatus::Cloudflare);
+
+        Livewire::test(EditSite::class, ['record' => $site->getRouteKey()])
+            ->assertActionVisible('provisionInForge')
+            ->assertActionHasLabel('provisionInForge', 'Retry SSL')
+            ->callAction('provisionInForge');
+
+        Queue::assertPushed(RequestSiteSsl::class, fn (RequestSiteSsl $job): bool => $job->siteId === $site->id);
+    }
+
     public function test_nothing_to_redo_while_ssl_is_queued(): void
     {
         $site = $this->siteWithStatus(ForgeDomainStatus::Provisioned, ForgeSslStatus::Queued);
