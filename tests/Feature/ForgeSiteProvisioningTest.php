@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Console\Commands\RetryForgeSetup;
 use App\Jobs\AddSiteToForge;
 use App\Jobs\CheckSiteForgeStatus;
 use App\Jobs\RequestSiteSsl;
@@ -13,6 +14,7 @@ use App\Services\Forge\ForgeSslStatus;
 use Illuminate\Bus\UniqueLock;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -447,6 +449,81 @@ class ForgeSiteProvisioningTest extends TestCase
     public function test_the_weekly_check_is_scheduled(): void
     {
         $this->artisan('schedule:list')->expectsOutputToContain('sites:check-forge-status');
+    }
+
+    /* ----------  Hourly retry  ---------- */
+
+    public function test_the_hourly_retry_queues_the_step_each_stuck_site_needs(): void
+    {
+        Queue::fake([AddSiteToForge::class, RequestSiteSsl::class]);
+        $sslFailed = $this->siteWithForgeStatus(ForgeDomainStatus::Provisioned, ForgeSslStatus::Failed);
+        $sslStalled = $this->siteWithForgeStatus(ForgeDomainStatus::Provisioned, ForgeSslStatus::InProgress);
+        $domainFailed = $this->siteWithForgeStatus(ForgeDomainStatus::Failed, ForgeSslStatus::Missing);
+        $domainStalled = $this->siteWithForgeStatus(ForgeDomainStatus::InProgress, ForgeSslStatus::Queued);
+        $done = $this->siteWithForgeStatus(ForgeDomainStatus::Provisioned, ForgeSslStatus::Installed);
+        $cloudflare = $this->siteWithForgeStatus(ForgeDomainStatus::Provisioned, ForgeSslStatus::Cloudflare);
+        Queue::fake([AddSiteToForge::class, RequestSiteSsl::class]);
+
+        $this->artisan('sites:retry-forge-setup')
+            ->expectsOutputToContain('Queued 4 retries.')
+            ->assertSuccessful();
+
+        Queue::assertPushed(RequestSiteSsl::class, 2);
+        Queue::assertPushed(RequestSiteSsl::class, fn (RequestSiteSsl $job): bool => $job->siteId === $sslFailed->id);
+        Queue::assertPushed(RequestSiteSsl::class, fn (RequestSiteSsl $job): bool => $job->siteId === $sslStalled->id);
+        Queue::assertPushed(AddSiteToForge::class, 2);
+        Queue::assertPushed(AddSiteToForge::class, fn (AddSiteToForge $job): bool => $job->siteId === $domainFailed->id);
+        Queue::assertPushed(AddSiteToForge::class, fn (AddSiteToForge $job): bool => $job->siteId === $domainStalled->id);
+        Queue::assertNotPushed(RequestSiteSsl::class, fn (RequestSiteSsl $job): bool => in_array($job->siteId, [$done->id, $cloudflare->id], true));
+        $this->assertSame(ForgeSslStatus::Queued, $sslFailed->refresh()->forge_ssl_status);
+    }
+
+    public function test_the_hourly_retry_leaves_a_site_checked_recently_alone(): void
+    {
+        Queue::fake([AddSiteToForge::class, RequestSiteSsl::class]);
+        $this->siteWithForgeStatus(ForgeDomainStatus::Provisioned, ForgeSslStatus::Failed, checkedAt: now()->subMinutes(10));
+        Queue::fake([AddSiteToForge::class, RequestSiteSsl::class]);
+
+        $this->artisan('sites:retry-forge-setup')
+            ->expectsOutputToContain('Queued 0 retries.')
+            ->assertSuccessful();
+
+        Queue::assertNothingPushed();
+    }
+
+    public function test_the_hourly_retry_works_through_a_backlog_a_batch_at_a_time(): void
+    {
+        Queue::fake([AddSiteToForge::class, RequestSiteSsl::class]);
+        $oldest = $this->siteWithForgeStatus(ForgeDomainStatus::Provisioned, ForgeSslStatus::Failed, checkedAt: now()->subDays(3));
+
+        foreach (range(1, RetryForgeSetup::BATCH_SIZE) as $i) {
+            $this->siteWithForgeStatus(ForgeDomainStatus::Provisioned, ForgeSslStatus::Failed, checkedAt: now()->subHours(2));
+        }
+
+        Queue::fake([AddSiteToForge::class, RequestSiteSsl::class]);
+
+        $this->artisan('sites:retry-forge-setup')->assertSuccessful();
+
+        Queue::assertPushed(RequestSiteSsl::class, RetryForgeSetup::BATCH_SIZE);
+        Queue::assertPushed(RequestSiteSsl::class, fn (RequestSiteSsl $job): bool => $job->siteId === $oldest->id);
+    }
+
+    public function test_the_hourly_retry_is_scheduled(): void
+    {
+        $this->artisan('schedule:list')->expectsOutputToContain('sites:retry-forge-setup');
+    }
+
+    private function siteWithForgeStatus(ForgeDomainStatus $domain, ForgeSslStatus $ssl, ?Carbon $checkedAt = null): Site
+    {
+        $site = Site::factory()->create(['domains' => [fake()->unique()->domainName()]]);
+
+        Site::query()->whereKey($site->id)->update([
+            'forge_domain_status' => $domain->value,
+            'forge_ssl_status' => $ssl->value,
+            'forge_checked_at' => $checkedAt ?? now()->subHours(2),
+        ]);
+
+        return $site->refresh();
     }
 
     /**

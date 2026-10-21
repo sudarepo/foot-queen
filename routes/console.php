@@ -34,6 +34,12 @@ Schedule::command('chaturbate:sync-stats')->hourly()->withoutOverlapping(10);
 Schedule::command('sites:check-forge-status')->weekly()->withoutOverlapping(30);
 
 /*
+ * A site whose Forge setup failed or stalled — an API error, a refused
+ * certificate — is retried a few at a time each hour until it's done.
+ */
+Schedule::command('sites:retry-forge-setup')->hourly()->withoutOverlapping(30);
+
+/*
  * There's no queue daemon on the server, so the scheduler drains the queue
  * once a minute. It matters for the Forge sync above all: run from a web
  * request, the PHP-FPM reloads each new certificate triggers kill the sync
