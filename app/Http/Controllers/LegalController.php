@@ -49,7 +49,7 @@ class LegalController extends Controller
             // The "N live" counter in the header is part of the chrome on
             // every other page; a legal page that reported zero would read as
             // a dead site rather than as a static document.
-            'totalOnline' => Cam::online()->forSite($site)->count(),
+            'totalOnline' => Cam::onlineCountFor($site),
         ]);
     }
 }

@@ -2,8 +2,10 @@
 
 namespace App\Models;
 
+use App\Services\SiteCamIndex;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Cache;
 
 class Cam extends Model
 {
@@ -22,6 +24,38 @@ class Cam extends Model
         'last_seen_at' => 'datetime',
         'profile_fetched_at' => 'datetime',
     ];
+
+    /**
+     * How long the per-site "N live" figure is reused. It's on every page of
+     * every domain, and nobody can tell 7,204 from 7,211.
+     */
+    private const ONLINE_COUNT_TTL = 60;
+
+    protected static function booted(): void
+    {
+        /**
+         * Keeps cam_site current for cams written through the model. The
+         * sync upserts through the query builder and indexes its batches
+         * itself (CamSyncService).
+         */
+        static::saved(function (Cam $cam) {
+            if ($cam->wasRecentlyCreated || $cam->wasChanged('tags')) {
+                app(SiteCamIndex::class)->indexCams([$cam->getKey() => $cam->tags]);
+            }
+        });
+    }
+
+    /**
+     * This site's online performer count, cached briefly.
+     */
+    public static function onlineCountFor(Site $site): int
+    {
+        return Cache::remember(
+            "sites.{$site->getKey()}.online-count",
+            self::ONLINE_COUNT_TTL,
+            fn () => static::online()->forSite($site)->count(),
+        );
+    }
 
     /* ----------  Profile accessors  ---------- */
 
@@ -68,6 +102,9 @@ class Cam extends Model
      * Deliberately not clearable from the UI, unlike the category filter — a
      * visitor picking "All categories" is asking to leave the site's default
      * category, not to leave the site.
+     *
+     * The tag match is precomputed into cam_site (see SiteCamIndex) — matching
+     * JSON at read time across ~240 domains is what used to saturate MySQL.
      */
     public function scopeForSite($query, Site $site)
     {
@@ -75,16 +112,13 @@ class Cam extends Model
             $query->where('gender', $site->gender);
         }
 
-        $tags = $site->tags ?? [];
-
         // No tags means the site is defined by gender alone (or takes
         // everything) — a niche-less site, not a site with an empty niche.
-        if ($tags !== []) {
-            $query->where(function ($query) use ($tags) {
-                foreach ($tags as $tag) {
-                    $query->orWhereJsonContains('tags', $tag);
-                }
-            });
+        if (filled($site->tags)) {
+            $query->whereIn(
+                $query->qualifyColumn('id'),
+                fn ($matches) => $matches->select('cam_id')->from('cam_site')->where('site_id', $site->getKey())
+            );
         }
 
         return $query;

@@ -9,6 +9,8 @@ use Illuminate\Support\Facades\Log;
 
 class CamSyncService
 {
+    public function __construct(private SiteCamIndex $siteCamIndex) {}
+
     /**
      * Run a full sync across all enabled providers.
      * Returns a per-provider count of upserted cams.
@@ -84,9 +86,17 @@ class CamSyncService
                 ]
             );
 
-            foreach ($chunk as $cam) {
-                $seenIds[] = $cam['external_id'];
-            }
+            $chunkIds = array_column($chunk, 'external_id');
+
+            $this->siteCamIndex->indexCams(
+                DB::table('cams')
+                    ->where('provider', $provider)
+                    ->whereIn('external_id', $chunkIds)
+                    ->pluck('tags', 'id')
+                    ->all()
+            );
+
+            array_push($seenIds, ...$chunkIds);
         }
 
         // Mark cams from this provider that we didn't see as offline.

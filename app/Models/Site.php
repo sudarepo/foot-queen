@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Jobs\AddSiteToForge;
+use App\Jobs\IndexSiteCams;
 use App\Services\DeviceDetector;
 use App\Services\Forge\ForgeDomainStatus;
 use App\Services\Forge\ForgeSslStatus;
@@ -88,7 +89,17 @@ class Site extends Model
             }
 
             static::flushRegistry();
+
+            /**
+             * Which cams this site shows is precomputed from its tags (see
+             * SiteCamIndex), so a new site or a tag edit has to re-match.
+             */
+            if ($site->wasRecentlyCreated || $site->wasChanged('tags')) {
+                IndexSiteCams::dispatch($site->getKey());
+            }
         });
+
+        static::restored(fn (Site $site) => IndexSiteCams::dispatch($site->getKey()));
 
         /**
          * A new domain is set up in Forge the moment it exists here — no
