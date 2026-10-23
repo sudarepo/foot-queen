@@ -8,6 +8,7 @@ use App\Models\Site;
 use App\Services\Forge\ForgeDomainProvisioner;
 use App\Services\Forge\ForgeDomainStatus;
 use App\Services\Forge\ForgeSslStatus;
+use Carbon\CarbonInterface;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
@@ -32,6 +33,13 @@ class RetryForgeSetup extends Command
     public const RETRY_AFTER_MINUTES = 50;
 
     /**
+     * A refused certificate is retried far less often than a stalled one. It
+     * is nearly always DNS that doesn't point here, which an hourly retry
+     * won't fix — and every attempt still reloads nginx on the whole server.
+     */
+    public const RETRY_FAILED_SSL_AFTER_HOURS = 24;
+
+    /**
      * Scheduled hourly, so a site can be added and forgotten: a Forge API
      * error, a certificate Let's Encrypt refused, or a status left
      * "In progress" when its follow-up checks ran out all get another go
@@ -49,11 +57,14 @@ class RetryForgeSetup extends Command
         $sites = Site::query()
             ->whereNotNull('domains')
             ->where(fn (Builder $query): Builder => $query
-                ->whereIn('forge_domain_status', [ForgeDomainStatus::Failed, ForgeDomainStatus::InProgress])
-                ->orWhereIn('forge_ssl_status', [ForgeSslStatus::Failed, ForgeSslStatus::InProgress, ForgeSslStatus::Queued]))
-            ->where(fn (Builder $query): Builder => $query
-                ->whereNull('forge_checked_at')
-                ->orWhere('forge_checked_at', '<', now()->subMinutes(self::RETRY_AFTER_MINUTES)))
+                ->where(fn (Builder $stuck): Builder => $stuck
+                    ->where(fn (Builder $status): Builder => $status
+                        ->whereIn('forge_domain_status', [ForgeDomainStatus::Failed, ForgeDomainStatus::InProgress])
+                        ->orWhereIn('forge_ssl_status', [ForgeSslStatus::InProgress, ForgeSslStatus::Queued]))
+                    ->where(fn (Builder $checked): Builder => $this->checkedBefore($checked, now()->subMinutes(self::RETRY_AFTER_MINUTES))))
+                ->orWhere(fn (Builder $refused): Builder => $refused
+                    ->where('forge_ssl_status', ForgeSslStatus::Failed)
+                    ->where(fn (Builder $checked): Builder => $this->checkedBefore($checked, now()->subHours(self::RETRY_FAILED_SSL_AFTER_HOURS)))))
             ->orderByRaw('forge_checked_at is not null, forge_checked_at')
             ->limit(self::BATCH_SIZE)
             ->get();
@@ -71,5 +82,10 @@ class RetryForgeSetup extends Command
         $this->info("Queued {$sites->count()} retr".($sites->count() === 1 ? 'y' : 'ies').'.');
 
         return self::SUCCESS;
+    }
+
+    private function checkedBefore(Builder $query, CarbonInterface $cutoff): Builder
+    {
+        return $query->whereNull('forge_checked_at')->orWhere('forge_checked_at', '<', $cutoff);
     }
 }

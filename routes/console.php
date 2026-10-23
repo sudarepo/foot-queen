@@ -40,6 +40,13 @@ Schedule::command('sites:check-forge-status')->weekly()->withoutOverlapping(30);
 Schedule::command('sites:retry-forge-setup')->hourly()->withoutOverlapping(30);
 
 /*
+ * A config naming certificate files that don't exist stops nginx from ever
+ * restarting, for every site on the server — Forge left one behind on
+ * 2026-10-23. Caught within a minute and handed back to Forge to remove.
+ */
+Schedule::command('sites:check-nginx-certificates')->everyMinute()->withoutOverlapping(5);
+
+/*
  * There's no queue daemon on the server, so the scheduler drains the queue
  * once a minute. It matters for the Forge sync above all: run from a web
  * request, the PHP-FPM reloads each new certificate triggers kill the sync

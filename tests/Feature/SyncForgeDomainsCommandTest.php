@@ -110,8 +110,9 @@ class SyncForgeDomainsCommandTest extends TestCase
             ->expectsOutputToContain('certificate request submitted')
             ->assertExitCode(0);
 
-        // Two reads, two writes, then a fresh read to record the new status.
-        Http::assertSentCount(6);
+        // Two reads, two writes, a read to see the certificate settle, then a
+        // fresh read to record the new status.
+        Http::assertSentCount(7);
 
         Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
             && $request->url() === self::BASE.'/domains'
@@ -192,8 +193,9 @@ class SyncForgeDomainsCommandTest extends TestCase
             ->expectsOutputToContain('certificate request submitted')
             ->assertExitCode(0);
 
-        // Two reads, one write, then a fresh read to record the new status.
-        Http::assertSentCount(5);
+        // Two reads, one write, a read to see the certificate settle, then a
+        // fresh read to record the new status.
+        Http::assertSentCount(6);
         Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST'
             && $request->url() === self::BASE.'/domains');
     }
