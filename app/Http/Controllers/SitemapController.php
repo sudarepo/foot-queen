@@ -7,6 +7,7 @@ use App\Models\Site;
 use App\Services\LegalPage;
 use App\Services\SeoPageResolver;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Cache;
 
 class SitemapController extends Controller
 {
@@ -38,7 +39,38 @@ class SitemapController extends Controller
         return app(Site::class);
     }
 
+    /**
+     * Sitemaps are rebuilt this often at most. Each one is ~20k profile URLs,
+     * which took 10+ seconds of CPU to build — and crawlers fetch them on every
+     * domain, so building on each request kept PHP-FPM saturated.
+     */
+    private const CACHE_SECONDS = 6 * 60 * 60;
+
     public function sitemap(): Response
+    {
+        /**
+         * Keyed by the URL root as well as the site, since every <loc> is
+         * built with url() — www and apex each get their own copy. A hash of
+         * the site's record is in the key so an edit (a layout pinned, the
+         * SEO registry swapped) shows on the next crawl; the default site
+         * answers for any unclaimed host, so its copies couldn't be listed to
+         * forget. Stored gzipped and base64'd: ~10x smaller, safe in any store.
+         */
+        $site = $this->site();
+        $version = md5(json_encode($site->getAttributes()));
+
+        $xml = gzdecode(base64_decode(Cache::remember(
+            "sitemap:{$site->getKey()}:{$version}:".url('/'),
+            self::CACHE_SECONDS,
+            fn () => base64_encode(gzencode($this->buildSitemap(), 6)),
+        )));
+
+        return response($xml, 200, [
+            'Content-Type' => 'application/xml; charset=utf-8',
+        ]);
+    }
+
+    private function buildSitemap(): string
     {
         $today = now()->toDateString();
 
@@ -97,11 +129,7 @@ class SitemapController extends Controller
             $urls[] = $url;
         }
 
-        $xml = $this->buildXml($urls);
-
-        return response($xml, 200, [
-            'Content-Type' => 'application/xml; charset=utf-8',
-        ]);
+        return $this->buildXml($urls);
     }
 
     public function robots(): Response
