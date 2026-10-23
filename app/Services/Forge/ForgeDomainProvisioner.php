@@ -12,6 +12,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Sleep;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -56,6 +57,20 @@ class ForgeDomainProvisioner
     private const DEFAULT_RETRY_AFTER_SECONDS = 60;
 
     private const MAX_RETRY_AFTER_SECONDS = 120;
+
+    /**
+     * Forge issues a certificate in the background, ~20–40 seconds of it
+     * rewriting nginx config and reloading. Firing the next request while one
+     * is still going overlapped those, and on 2026-10-23 one left a config
+     * pointing at certificate files that were never written — nginx then
+     * refused to start and every site on the server went down. So a live run
+     * waits for each certificate to settle before asking for the next, and
+     * before returning, so the next job can't overlap it either.
+     */
+    private const CERTIFICATE_SETTLE_POLL_SECONDS = 10;
+
+    /** A certificate Forge is stuck on doesn't hold a run forever. */
+    private const CERTIFICATE_SETTLE_MAX_SECONDS = 240;
 
     /**
      * What's in Forge, cached for the admin screens. A provisioned domain
@@ -364,6 +379,10 @@ class ForgeDomainProvisioner
                     continue;
                 }
 
+                if ($this->hasPendingCertificate($certificates)) {
+                    $certificates = $this->waitForPendingCertificates($domainIds);
+                }
+
                 $response = $this->forge()->post($this->domainCertificatesEndpoint($domainId), [
                     'type' => 'letsencrypt',
                     'enable' => true,
@@ -386,7 +405,69 @@ class ForgeDomainProvisioner
             }
         }
 
+        if (! $dryRun && $summary['requested_certificates'] > 0) {
+            $this->waitForPendingCertificates($domainIds);
+        }
+
         return $summary;
+    }
+
+    /**
+     * @param  Collection<string, array{status:string, active:bool, updated_at:?Carbon}>  $certificates
+     */
+    private function hasPendingCertificate(Collection $certificates): bool
+    {
+        return $certificates->contains(
+            fn (array $certificate): bool => ! in_array($certificate['status'], ['installed', self::STATUS_FAILED], true)
+        );
+    }
+
+    /**
+     * Poll until Forge has no certificate still being issued on this site,
+     * or the wait runs out, and return the latest state.
+     *
+     * @param  Collection<string, string>  $domainIds
+     * @return Collection<string, array{status:string, active:bool, updated_at:?Carbon}>
+     */
+    private function waitForPendingCertificates(Collection $domainIds): Collection
+    {
+        $deadline = now()->addSeconds(self::CERTIFICATE_SETTLE_MAX_SECONDS);
+
+        while (true) {
+            $certificates = $this->latestCertificates($domainIds);
+
+            if (! $this->hasPendingCertificate($certificates) || now()->gte($deadline)) {
+                return $certificates;
+            }
+
+            Sleep::for(self::CERTIFICATE_SETTLE_POLL_SECONDS)->seconds();
+        }
+    }
+
+    /**
+     * Delete one certificate, so Forge rewrites the domain's nginx config
+     * without it. Refuses a domain record that isn't this Forge site's — the
+     * server hosts other sites whose certificates are none of our business.
+     *
+     * @throws \RuntimeException when Forge can't be read or refuses
+     */
+    public function deleteCertificate(string $domainId, string $certificateId): string
+    {
+        $domain = $this->fetchDomainRecords()->flip()->get($domainId);
+
+        if ($domain === null) {
+            throw new \RuntimeException("Domain record {$domainId} does not belong to this Forge site.");
+        }
+
+        $response = $this->forge()->delete($this->domainCertificatesEndpoint($domainId).'/'.$certificateId);
+
+        if ($response->failed()) {
+            throw new \RuntimeException("Unable to delete certificate {$certificateId} for {$domain}: ".$this->responseMessage($response));
+        }
+
+        $this->forgetSnapshot();
+
+        return $domain;
     }
 
     /**

@@ -40,6 +40,12 @@ return [
         'token' => env('FORGE_API_TOKEN'),
         'server_id' => env('FORGE_SERVER_ID'),
         'site_id' => env('FORGE_SITE_ID'),
+
+        /*
+         * Read by sites:check-nginx-certificates on the server itself; a
+         * directory that doesn't exist (anywhere but the server) is skipped.
+         */
+        'nginx_config_paths' => ['/etc/nginx/sites-enabled', '/etc/nginx/forge-conf'],
     ],
 
 ];
