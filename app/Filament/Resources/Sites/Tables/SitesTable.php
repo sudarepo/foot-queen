@@ -69,7 +69,7 @@ class SitesTable
                     ->label('Live now')
                     ->badge()
                     ->color(fn (int $state) => $state > 0 ? 'success' : 'danger')
-                    ->state(fn (Site $record) => Cam::online()->forSite($record)->count('*')),
+                    ->state(fn (Site $record) => Cam::onlineCountFor($record)),
 
                 /**
                  * Which sites are still splitting their traffic and which

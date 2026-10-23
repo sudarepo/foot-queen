@@ -18,6 +18,13 @@ class SitemapController extends Controller
      */
     private const PROFILE_URL_LIMIT = 20000;
 
+    /**
+     * Crawlers turned away entirely in robots.txt.
+     *
+     * @var array<int, string>
+     */
+    private const BLOCKED_CRAWLERS = ['DotBot', 'AhrefsBot', 'SemrushBot', 'MJ12bot', 'GPTBot'];
+
     public function __construct(private SeoPageResolver $seo) {}
 
     /**
@@ -99,7 +106,15 @@ class SitemapController extends Controller
 
     public function robots(): Response
     {
-        $lines = [
+        $lines = [];
+
+        // SEO-tool and AI crawlers: no search traffic in return, and across
+        // ~240 domains they were a large share of the load on the box.
+        foreach (self::BLOCKED_CRAWLERS as $crawler) {
+            array_push($lines, "User-agent: {$crawler}", 'Disallow: /', '');
+        }
+
+        array_push($lines,
             'User-agent: *',
             'Disallow: /go/',                 // outbound affiliate redirects — don't index
             'Disallow: /?gender=',            // filtered variants of homepage — avoid dupes
@@ -111,7 +126,7 @@ class SitemapController extends Controller
             'Allow: /',
             '',
             'Sitemap: '.url('/sitemap.xml'),
-        ];
+        );
 
         return response(implode("\n", $lines)."\n", 200, [
             'Content-Type' => 'text/plain; charset=utf-8',

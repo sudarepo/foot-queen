@@ -414,7 +414,7 @@ class CamController extends Controller
      */
     private function totalOnline(): int
     {
-        return Cam::online()->forSite($this->site())->count();
+        return Cam::onlineCountFor($this->site());
     }
 
     /**

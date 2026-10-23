@@ -218,6 +218,16 @@ class MultiSiteTest extends TestCase
             ->assertSee('Sitemap: http://bbwcams.test/sitemap.xml', false);
     }
 
+    public function test_robots_turns_away_seo_tool_crawlers_but_not_search_engines(): void
+    {
+        $this->get($this->defaultHost('/robots.txt'))
+            ->assertOk()
+            ->assertSee("User-agent: DotBot\nDisallow: /\n", false)
+            ->assertSee("User-agent: GPTBot\nDisallow: /\n", false)
+            ->assertSee("User-agent: *\nDisallow: /go/", false)
+            ->assertDontSee('Googlebot', false);
+    }
+
     public function test_a_landing_page_outside_the_sites_registry_is_not_found(): void
     {
         // Routes exist for every registry's slugs, but a site with no registry
