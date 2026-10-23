@@ -2,7 +2,7 @@
 
 namespace App\Models;
 
-use App\Services\SiteCamIndex;
+use App\Services\CamTagIndex;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Cache;
@@ -34,13 +34,13 @@ class Cam extends Model
     protected static function booted(): void
     {
         /**
-         * Keeps cam_site current for cams written through the model. The
+         * Keeps cam_tags current for cams written through the model. The
          * sync upserts through the query builder and indexes its batches
          * itself (CamSyncService).
          */
         static::saved(function (Cam $cam) {
             if ($cam->wasRecentlyCreated || $cam->wasChanged('tags')) {
-                app(SiteCamIndex::class)->indexCams([$cam->getKey() => $cam->tags]);
+                app(CamTagIndex::class)->indexCams([$cam->getKey() => $cam->tags]);
             }
         });
     }
@@ -103,8 +103,9 @@ class Cam extends Model
      * visitor picking "All categories" is asking to leave the site's default
      * category, not to leave the site.
      *
-     * The tag match is precomputed into cam_site (see SiteCamIndex) — matching
-     * JSON at read time across ~240 domains is what used to saturate MySQL.
+     * Tags are matched through the indexed cam_tags rows (see CamTagIndex) —
+     * matching JSON at read time across ~240 domains is what used to saturate
+     * MySQL.
      */
     public function scopeForSite($query, Site $site)
     {
@@ -117,7 +118,7 @@ class Cam extends Model
         if (filled($site->tags)) {
             $query->whereIn(
                 $query->qualifyColumn('id'),
-                fn ($matches) => $matches->select('cam_id')->from('cam_site')->where('site_id', $site->getKey())
+                fn ($matches) => $matches->select('cam_id')->from('cam_tags')->whereIn('tag', $site->tags)
             );
         }
 

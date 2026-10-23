@@ -12,11 +12,11 @@ use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 /**
- * cam_site is what Cam::scopeForSite reads, so it has to follow every way a
- * cam's tags or a site's tags can change — otherwise a site silently shows
- * the wrong performers, or none.
+ * cam_tags is what Cam::scopeForSite matches against, so it has to follow
+ * every way a cam's tags can change — otherwise a site silently shows the
+ * wrong performers, or none.
  */
-class SiteCamIndexTest extends TestCase
+class CamTagIndexTest extends TestCase
 {
     use RefreshDatabase;
 
@@ -54,6 +54,14 @@ class SiteCamIndexTest extends TestCase
         $this->assertSame(['inked'], $this->usernamesFor($site->fresh()));
     }
 
+    public function test_a_cam_matching_several_site_tags_is_listed_once(): void
+    {
+        Cam::factory()->create(['username' => 'curvytoes', 'tags' => ['feet', 'toes', 'bbw']]);
+
+        $this->assertSame(['curvytoes'], $this->usernamesFor($this->footQueen()));
+        $this->assertSame(1, Cam::online()->forSite($this->footQueen())->count());
+    }
+
     public function test_a_cam_whose_tags_change_moves_between_sites(): void
     {
         $bbw = Site::factory()->create(['tags' => ['bbw'], 'gender' => 'female']);
@@ -65,14 +73,13 @@ class SiteCamIndexTest extends TestCase
         $this->assertSame([], $this->usernamesFor($this->footQueen()));
     }
 
-    public function test_a_site_without_tags_needs_no_rows_and_takes_its_whole_gender(): void
+    public function test_a_site_without_tags_takes_its_whole_gender(): void
     {
         Cam::factory()->create(['username' => 'anna', 'tags' => ['feet']]);
         Cam::factory()->create(['username' => 'bob', 'tags' => ['feet'], 'gender' => 'male']);
 
         $site = Site::factory()->create(['tags' => [], 'gender' => 'female']);
 
-        $this->assertSame(0, DB::table('cam_site')->where('site_id', $site->id)->count());
         $this->assertSame(['anna'], $this->usernamesFor($site));
     }
 
@@ -111,9 +118,9 @@ class SiteCamIndexTest extends TestCase
         Cam::factory()->create(['username' => 'curvy', 'tags' => ['bbw']]);
         Cam::factory()->create(['username' => 'toes', 'tags' => ['feet']]);
 
-        DB::table('cam_site')->delete();
+        DB::table('cam_tags')->delete();
 
-        $this->artisan('cams:index-sites')->assertSuccessful();
+        $this->artisan('cams:index-tags')->assertSuccessful();
 
         $this->assertSame(['curvy'], $this->usernamesFor($bbw));
         $this->assertSame(['toes'], $this->usernamesFor($this->footQueen()));

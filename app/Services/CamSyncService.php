@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Log;
 
 class CamSyncService
 {
-    public function __construct(private SiteCamIndex $siteCamIndex) {}
+    public function __construct(private CamTagIndex $camTagIndex) {}
 
     /**
      * Run a full sync across all enabled providers.
@@ -88,7 +88,7 @@ class CamSyncService
 
             $chunkIds = array_column($chunk, 'external_id');
 
-            $this->siteCamIndex->indexCams(
+            $this->camTagIndex->indexCams(
                 DB::table('cams')
                     ->where('provider', $provider)
                     ->whereIn('external_id', $chunkIds)
