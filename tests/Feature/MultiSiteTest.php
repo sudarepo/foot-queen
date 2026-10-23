@@ -209,6 +209,27 @@ class MultiSiteTest extends TestCase
             ->assertDontSee('/cam/feetonly', false);
     }
 
+    public function test_the_sitemap_is_cached_per_domain(): void
+    {
+        $this->bbwSite();
+        Cam::factory()->create(['username' => 'bbwonly', 'tags' => ['bbw'], 'categories' => ['bbw']]);
+
+        $this->get('http://bbwcams.test/sitemap.xml')->assertSee('/cam/bbwonly', false);
+
+        Cam::factory()->create(['username' => 'latecomer', 'tags' => ['bbw'], 'categories' => ['bbw']]);
+
+        // Same domain: served from cache. Another domain: its own sitemap.
+        $this->get('http://bbwcams.test/sitemap.xml')
+            ->assertSee('http://bbwcams.test/cam/bbwonly', false)
+            ->assertDontSee('/cam/latecomer', false);
+        $this->get($this->defaultHost('/sitemap.xml'))->assertDontSee('/cam/bbwonly', false);
+
+        $this->travel(6)->hours();
+        $this->travel(1)->minutes();
+
+        $this->get('http://bbwcams.test/sitemap.xml')->assertSee('/cam/latecomer', false);
+    }
+
     public function test_robots_points_at_the_requesting_domains_own_sitemap(): void
     {
         $this->bbwSite();
