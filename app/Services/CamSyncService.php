@@ -102,7 +102,8 @@ class CamSyncService
         // Mark cams from this provider that we didn't see as offline.
         // They're kept in the DB (useful for "recently online" features later)
         // but won't show up in the grid.
-        Cam::where('provider', $provider)
+        Cam::withoutGlobalScope('not_banned')
+            ->where('provider', $provider)
             ->where('is_online', true)
             ->whereNotIn('external_id', $seenIds)
             ->update(['is_online' => false]);

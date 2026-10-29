@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Services\CamTagIndex;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Cache;
@@ -19,6 +20,7 @@ class Cam extends Model
         'profile_attributes' => 'array',
         'photo_sets' => 'array',
         'is_online' => 'boolean',
+        'is_banned' => 'boolean',
         'is_hd' => 'boolean',
         'is_new' => 'boolean',
         'last_seen_at' => 'datetime',
@@ -33,6 +35,12 @@ class Cam extends Model
 
     protected static function booted(): void
     {
+        // A banned cam remains in the pool for admin visibility and sync,
+        // but is hidden from all user-facing query paths by default.
+        static::addGlobalScope('not_banned', function (Builder $builder) {
+            $builder->where('is_banned', false);
+        });
+
         /**
          * Keeps cam_tags current for cams written through the model. The
          * sync upserts through the query builder and indexes its batches
