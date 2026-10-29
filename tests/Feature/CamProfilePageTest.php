@@ -217,6 +217,16 @@ class CamProfilePageTest extends TestCase
         $this->get('/cam/nobody-by-that-name')->assertStatus(404);
     }
 
+    public function test_a_banned_performer_is_not_accessible(): void
+    {
+        $cam = $this->camWithProfile([
+            'is_banned' => true,
+        ]);
+
+        $this->get(route('cams.show', $cam->username))->assertNotFound();
+        $this->get(route('cams.redirect', $cam))->assertNotFound();
+    }
+
     public function test_it_offers_the_way_back_to_the_listing_the_visitor_came_from(): void
     {
         $cam = $this->camWithProfile();

@@ -36,9 +36,10 @@ class CamInfolist
                             ->columnSpanFull(),
                     ]),
                 Section::make('Status')
-                    ->columns(4)
+                    ->columns(5)
                     ->schema([
                         IconEntry::make('is_online')->label('Online')->boolean(),
+                        IconEntry::make('is_banned')->label('Banned')->boolean(),
                         IconEntry::make('is_hd')->label('HD')->boolean(),
                         IconEntry::make('is_new')->label('New')->boolean(),
                         TextEntry::make('last_seen_at')->dateTime(),

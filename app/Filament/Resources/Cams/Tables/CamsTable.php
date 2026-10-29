@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Cams\Tables;
 
+use App\Models\Cam;
 use Filament\Actions\Action;
 use Filament\Actions\ViewAction;
 use Filament\Support\Icons\Heroicon;
@@ -33,6 +34,9 @@ class CamsTable
                     ->sortable(),
                 IconColumn::make('is_online')
                     ->label('Online')
+                    ->boolean(),
+                IconColumn::make('is_banned')
+                    ->label('Banned')
                     ->boolean(),
                 IconColumn::make('is_hd')
                     ->label('HD')
@@ -67,9 +71,25 @@ class CamsTable
                     ]),
                 TernaryFilter::make('is_hd')
                     ->label('HD'),
+                TernaryFilter::make('is_banned')
+                    ->label('Banned'),
             ])
             ->recordActions([
                 ViewAction::make(),
+                Action::make('toggleBan')
+                    ->label(fn (Cam $record) => $record->is_banned ? 'Unban' : 'Ban')
+                    ->icon(fn (Cam $record) => $record->is_banned ? Heroicon::OutlinedCheckCircle : Heroicon::OutlinedNoSymbol)
+                    ->color(fn (Cam $record) => $record->is_banned ? 'success' : 'danger')
+                    ->requiresConfirmation()
+                    ->modalHeading(fn (Cam $record) => $record->is_banned
+                        ? 'Unban this cam?'
+                        : 'Ban this cam?')
+                    ->modalDescription(fn (Cam $record) => $record->is_banned
+                        ? 'This cam will become visible again on public pages and sitemap entries.'
+                        : 'This cam will be hidden from public pages, profile URLs, and sitemap entries.')
+                    ->action(function (Cam $record): void {
+                        $record->update(['is_banned' => ! $record->is_banned]);
+                    }),
                 Action::make('visitRoom')
                     ->label('Visit room')
                     ->icon(Heroicon::OutlinedArrowTopRightOnSquare)

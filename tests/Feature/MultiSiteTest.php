@@ -209,6 +209,24 @@ class MultiSiteTest extends TestCase
             ->assertDontSee('/cam/feetonly', false);
     }
 
+    public function test_a_banned_cam_is_hidden_from_listing_and_sitemap(): void
+    {
+        Cam::factory()->create([
+            'username' => 'hiddenone',
+            'tags' => ['feet'],
+            'categories' => ['feet'],
+            'is_banned' => true,
+        ]);
+
+        $this->get($this->defaultHost('/feed'))
+            ->assertOk()
+            ->assertDontSee('hiddenone');
+
+        $this->get($this->defaultHost('/sitemap.xml'))
+            ->assertOk()
+            ->assertDontSee('/cam/hiddenone', false);
+    }
+
     public function test_the_sitemap_is_cached_per_domain(): void
     {
         $this->bbwSite();

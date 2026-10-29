@@ -18,6 +18,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Sleep;
 use Tests\TestCase;
 
 /**
@@ -163,8 +164,9 @@ class ForgeSiteProvisioningTest extends TestCase
         Queue::assertNotPushed(RequestSiteSsl::class);
     }
 
-    public function test_the_ssl_step_requests_the_certificate_and_keeps_checking_while_it_issues(): void
+    public function test_the_ssl_step_waits_for_the_certificate_to_install_before_finishing(): void
     {
+        Sleep::fake(syncWithCarbon: true);
         Queue::fake([AddSiteToForge::class, RequestSiteSsl::class, CheckSiteForgeStatus::class]);
         $site = Site::factory()->create(['domains' => ['new.example']]);
 
@@ -172,7 +174,61 @@ class ForgeSiteProvisioningTest extends TestCase
             self::BASE.'/domains?*' => Http::response($this->domainsPayload(['55' => 'new.example'])),
             self::BASE.'/certificates?*' => Http::sequence()
                 ->push($this->certificatesPayload([]))
-                ->push($this->certificatesPayload(['55' => 'installing'])),
+                ->push($this->certificatesPayload(['55' => 'installing']))
+                ->whenEmpty(Http::response($this->certificatesPayload(['55' => 'installed']))),
+            self::BASE.'/domains/55/certificates' => Http::response(['data' => ['id' => '900']], 201),
+        ]);
+
+        (new RequestSiteSsl($site->id))->handle(app(ForgeDomainProvisioner::class));
+
+        Sleep::assertSleptTimes(1);
+        $this->assertSame(ForgeSslStatus::Installed, $site->refresh()->forge_ssl_status);
+        Queue::assertNotPushed(CheckSiteForgeStatus::class);
+    }
+
+    public function test_a_certificate_request_waits_for_one_already_being_issued(): void
+    {
+        Sleep::fake(syncWithCarbon: true);
+        Queue::fake([AddSiteToForge::class, RequestSiteSsl::class, CheckSiteForgeStatus::class]);
+        $site = Site::factory()->create(['domains' => ['second.example']]);
+        $postedWhileOtherPending = null;
+
+        Http::fake(function (Request $request) use (&$postedWhileOtherPending) {
+            static $certificateReads = 0;
+
+            if (str_starts_with($request->url(), self::BASE.'/domains?')) {
+                return Http::response($this->domainsPayload(['1' => 'first.example', '2' => 'second.example']));
+            }
+
+            if (str_starts_with($request->url(), self::BASE.'/certificates?')) {
+                // first.example is mid-install for the first two reads.
+                return Http::response($this->certificatesPayload(
+                    ++$certificateReads <= 2 ? ['1' => 'installing'] : ['1' => 'installed', '2' => 'installed']
+                ));
+            }
+
+            $postedWhileOtherPending = $certificateReads <= 2;
+
+            return Http::response(['data' => ['id' => '900']], 201);
+        });
+
+        (new RequestSiteSsl($site->id))->handle(app(ForgeDomainProvisioner::class));
+
+        $this->assertFalse($postedWhileOtherPending, 'The request must wait until the other certificate settles.');
+        Sleep::assertSleptTimes(1);
+    }
+
+    public function test_the_ssl_step_hands_over_to_follow_up_checks_when_issuing_runs_long(): void
+    {
+        Sleep::fake(syncWithCarbon: true);
+        Queue::fake([AddSiteToForge::class, RequestSiteSsl::class, CheckSiteForgeStatus::class]);
+        $site = Site::factory()->create(['domains' => ['new.example']]);
+
+        Http::fake([
+            self::BASE.'/domains?*' => Http::response($this->domainsPayload(['55' => 'new.example'])),
+            self::BASE.'/certificates?*' => Http::sequence()
+                ->push($this->certificatesPayload([]))
+                ->whenEmpty(Http::response($this->certificatesPayload(['55' => 'installing']))),
             self::BASE.'/domains/55/certificates' => Http::response(['data' => ['id' => '900']], 201),
         ]);
 
@@ -327,6 +383,7 @@ class ForgeSiteProvisioningTest extends TestCase
 
     public function test_the_ssl_step_requests_a_certificate_for_a_domain_behind_cloudflare(): void
     {
+        Sleep::fake(syncWithCarbon: true);
         Queue::fake([AddSiteToForge::class, RequestSiteSsl::class, CheckSiteForgeStatus::class]);
         $this->behindCloudflare(['proxied.example']);
         $site = Site::factory()->create(['domains' => ['proxied.example']]);
@@ -335,7 +392,7 @@ class ForgeSiteProvisioningTest extends TestCase
             self::BASE.'/domains?*' => Http::response($this->domainsPayload(['1' => 'proxied.example'])),
             self::BASE.'/certificates?*' => Http::sequence()
                 ->push($this->certificatesPayload(['1' => 'failed']))
-                ->push($this->certificatesPayload(['1' => 'installing'])),
+                ->whenEmpty(Http::response($this->certificatesPayload(['1' => 'installing']))),
             self::BASE.'/domains/1/certificates' => Http::response(['data' => ['id' => '900']], 201),
         ]);
 
@@ -456,7 +513,7 @@ class ForgeSiteProvisioningTest extends TestCase
     public function test_the_hourly_retry_queues_the_step_each_stuck_site_needs(): void
     {
         Queue::fake([AddSiteToForge::class, RequestSiteSsl::class]);
-        $sslFailed = $this->siteWithForgeStatus(ForgeDomainStatus::Provisioned, ForgeSslStatus::Failed);
+        $sslFailed = $this->siteWithForgeStatus(ForgeDomainStatus::Provisioned, ForgeSslStatus::Failed, checkedAt: now()->subDays(2));
         $sslStalled = $this->siteWithForgeStatus(ForgeDomainStatus::Provisioned, ForgeSslStatus::InProgress);
         $domainFailed = $this->siteWithForgeStatus(ForgeDomainStatus::Failed, ForgeSslStatus::Missing);
         $domainStalled = $this->siteWithForgeStatus(ForgeDomainStatus::InProgress, ForgeSslStatus::Queued);
@@ -491,13 +548,33 @@ class ForgeSiteProvisioningTest extends TestCase
         Queue::assertNothingPushed();
     }
 
+    public function test_a_refused_certificate_is_retried_daily_not_hourly(): void
+    {
+        Queue::fake([AddSiteToForge::class, RequestSiteSsl::class]);
+        $refused = $this->siteWithForgeStatus(ForgeDomainStatus::Provisioned, ForgeSslStatus::Failed, checkedAt: now()->subHours(3));
+        $stalled = $this->siteWithForgeStatus(ForgeDomainStatus::Provisioned, ForgeSslStatus::InProgress, checkedAt: now()->subHours(3));
+        Queue::fake([AddSiteToForge::class, RequestSiteSsl::class]);
+
+        $this->artisan('sites:retry-forge-setup')->expectsOutputToContain('Queued 1 retry.')->assertSuccessful();
+
+        Queue::assertPushed(RequestSiteSsl::class, fn (RequestSiteSsl $job): bool => $job->siteId === $stalled->id);
+        Queue::assertNotPushed(RequestSiteSsl::class, fn (RequestSiteSsl $job): bool => $job->siteId === $refused->id);
+
+        $this->travel(RetryForgeSetup::RETRY_FAILED_SSL_AFTER_HOURS)->hours();
+        Queue::fake([AddSiteToForge::class, RequestSiteSsl::class]);
+
+        $this->artisan('sites:retry-forge-setup')->assertSuccessful();
+
+        Queue::assertPushed(RequestSiteSsl::class, fn (RequestSiteSsl $job): bool => $job->siteId === $refused->id);
+    }
+
     public function test_the_hourly_retry_works_through_a_backlog_a_batch_at_a_time(): void
     {
         Queue::fake([AddSiteToForge::class, RequestSiteSsl::class]);
         $oldest = $this->siteWithForgeStatus(ForgeDomainStatus::Provisioned, ForgeSslStatus::Failed, checkedAt: now()->subDays(3));
 
         foreach (range(1, RetryForgeSetup::BATCH_SIZE) as $i) {
-            $this->siteWithForgeStatus(ForgeDomainStatus::Provisioned, ForgeSslStatus::Failed, checkedAt: now()->subHours(2));
+            $this->siteWithForgeStatus(ForgeDomainStatus::Provisioned, ForgeSslStatus::Failed, checkedAt: now()->subDays(2));
         }
 
         Queue::fake([AddSiteToForge::class, RequestSiteSsl::class]);
