@@ -7,6 +7,7 @@ use App\Services\AdPlacement;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
+use Filament\Actions\ReplicateAction;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
@@ -71,6 +72,15 @@ class AdsTable
                     ->toggleable(),
             ])
             ->recordActions([
+                ReplicateAction::make()
+                    ->label('Duplicate campaign')
+                    ->excludeAttributes(['id', 'created_at', 'updated_at', 'impressions_count', 'clicks_count'])
+                    ->mutateRecordDataUsing(function (array $data): array {
+                        $data['campaign'] = trim(($data['campaign'] ?? 'Campaign').' (Copy)');
+                        $data['creative'] = trim(($data['creative'] ?? 'Creative').' (Copy)');
+
+                        return $data;
+                    }),
                 EditAction::make(),
             ])
             ->toolbarActions([
