@@ -7,6 +7,7 @@ use App\Models\AdClick;
 use App\Models\AdImpression;
 use App\Models\Site;
 use App\Services\AdPlacement;
+use App\Services\CountryDetector;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -16,6 +17,8 @@ use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
 class AdTrackingController extends Controller
 {
+    public function __construct(private CountryDetector $countries) {}
+
     public function impression(Request $request, Ad $ad, string $placement, string $token): Response
     {
         $this->ensureSignedRequest($request, $ad, $placement);
@@ -24,6 +27,7 @@ class AdTrackingController extends Controller
             AdImpression::create([
                 'ad_id' => $ad->getKey(),
                 'site_id' => app(Site::class)->getKey(),
+                'country' => $this->countries->detect($request),
                 'placement' => $placement,
                 'token' => $token,
                 'ip_address' => $request->ip(),
@@ -46,6 +50,7 @@ class AdTrackingController extends Controller
             AdClick::create([
                 'ad_id' => $ad->getKey(),
                 'site_id' => app(Site::class)->getKey(),
+                'country' => $this->countries->detect($request),
                 'placement' => $placement,
                 'token' => $token,
                 'ip_address' => $request->ip(),

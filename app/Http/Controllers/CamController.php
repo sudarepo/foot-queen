@@ -7,6 +7,7 @@ use App\Models\CamClickEvent;
 use App\Models\PageViewEvent;
 use App\Models\Site;
 use App\Services\CamProfileService;
+use App\Services\CountryDetector;
 use App\Services\DeviceDetector;
 use App\Services\HomepageAbTest;
 use App\Services\SeoPageResolver;
@@ -34,6 +35,7 @@ class CamController extends Controller
         private HomepageAbTest $abTest,
         private CamProfileService $profiles,
         private DeviceDetector $devices,
+        private CountryDetector $countries,
     ) {}
 
     /**
@@ -298,7 +300,7 @@ class CamController extends Controller
 
     /**
      * Analytics events carry the domain they happened on, and the kind of
-     * screen they happened on. Without the site the grid-vs-feed comparison
+     * screen and country they happened on. Without the site the grid-vs-feed comparison
      * pools every domain's traffic into one sample and stops describing any
      * actual page; without the device it pools a 390px feed with a 1440px
      * grid, where a variant can win on one and lose on the other.
@@ -308,6 +310,7 @@ class CamController extends Controller
         PageViewEvent::create([
             'site_id' => $this->site()->id,
             'device' => $this->devices->detect($request),
+            'country' => $this->countries->detect($request),
             'page' => $page,
         ]);
     }
@@ -317,6 +320,7 @@ class CamController extends Controller
         CamClickEvent::create([
             'site_id' => $this->site()->id,
             'device' => $this->devices->detect($request),
+            'country' => $this->countries->detect($request),
             'cam_id' => $cam->id,
             'source_page' => $source,
         ]);

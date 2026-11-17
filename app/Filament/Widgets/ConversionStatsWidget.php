@@ -40,11 +40,13 @@ class ConversionStatsWidget extends StatsOverviewWidget
         // Blank means both devices, which also keeps the rows logged before
         // device tracking shipped (device null) in the picture.
         $device = $this->pageFilters['device'] ?? null;
+        $country = $this->pageFilters['country'] ?? null;
 
         $views = PageViewEvent::query()
             ->when($siteId, fn ($query) => $query->where('site_id', $siteId))
             ->when($siteIds !== null, fn ($query) => $query->whereIn('site_id', $siteIds ?? []))
             ->when($device, fn ($query) => $query->where('device', $device))
+            ->when($country, fn ($query) => $query->where('country', $country))
             ->when($from, fn ($query) => $query->whereDate('created_at', '>=', $from))
             ->when($until, fn ($query) => $query->whereDate('created_at', '<=', $until))
             ->selectRaw('page, count(*) as aggregate')
@@ -55,6 +57,7 @@ class ConversionStatsWidget extends StatsOverviewWidget
             ->when($siteId, fn ($query) => $query->where('site_id', $siteId))
             ->when($siteIds !== null, fn ($query) => $query->whereIn('site_id', $siteIds ?? []))
             ->when($device, fn ($query) => $query->where('device', $device))
+            ->when($country, fn ($query) => $query->where('country', $country))
             ->when($from, fn ($query) => $query->whereDate('created_at', '>=', $from))
             ->when($until, fn ($query) => $query->whereDate('created_at', '<=', $until))
             ->selectRaw('source_page, count(*) as aggregate')
