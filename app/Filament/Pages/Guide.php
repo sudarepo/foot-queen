@@ -327,6 +327,7 @@ class Guide extends Page
                 $this->fields([
                     'Site' => 'Which domain\'s traffic to measure. Every site logs into the same tables, so pooling them averages different audiences into a rate that describes neither — read it per site.',
                     'Device' => 'Mobile means a phone-shaped screen, desktop everything else. Worth checking both: a pooled rate can hide a layout that wins on phones and loses on laptops.',
+                    'Country' => 'Where the visitor is. Filter to one market to see whether a layout wins there too — smaller countries have smaller samples, so give their rates time.',
                     'From / Until' => 'The date range. It starts at the day the split shipped, because before that "/" always served the grid and nothing linked to the feed — all-time totals make the grid look artificially ahead.',
                     'Grid (/) and Feed (/feed)' => 'Clicks divided by views for that layout, as a percentage. This — not raw click volume — is the number that answers which layout converts better.',
                     'Profile → Chaturbate' => 'The same rate for performer profile pages, which both layouts feed into.',

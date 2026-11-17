@@ -24,6 +24,7 @@ class TrafficTrendChartWidget extends ChartWidget
         $siteId = $this->pageFilters['site_id'] ?? null;
         $siteIds = Auth::user()?->administeredSiteIds();
         $device = $this->pageFilters['device'] ?? null;
+        $country = $this->pageFilters['country'] ?? null;
         $from = $this->pageFilters['from'] ?? now()->subDays(30)->toDateString();
         $until = $this->pageFilters['until'] ?? now()->toDateString();
 
@@ -31,6 +32,7 @@ class TrafficTrendChartWidget extends ChartWidget
             ->when($siteId, fn ($q) => $q->where('site_id', $siteId))
             ->when($siteIds !== null, fn ($q) => $q->whereIn('site_id', $siteIds ?? []))
             ->when($device, fn ($q) => $q->where('device', $device))
+            ->when($country, fn ($q) => $q->where('country', $country))
             ->whereDate('created_at', '>=', $from)
             ->whereDate('created_at', '<=', $until)
             ->selectRaw('DATE(created_at) as day, count(*) as aggregate')

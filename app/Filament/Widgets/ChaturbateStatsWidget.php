@@ -14,7 +14,7 @@ class ChaturbateStatsWidget extends StatsOverviewWidget
     protected static bool $isLazy = false;
 
     /**
-     * Deliberately ignores $this->pageFilters['site_id'] / ['device'] —
+     * Deliberately ignores $this->pageFilters['site_id'] / ['device'] / ['country'] —
      * Chaturbate's affiliate Stats API can't be broken down by site or
      * tracking sub-id, so this is always the whole account regardless of
      * what's picked in the page's Site filter. See StatsDashboard's

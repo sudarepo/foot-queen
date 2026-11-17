@@ -4,9 +4,12 @@ namespace App\Filament\Pages;
 
 use App\Filament\Widgets\ChaturbateRevenueChartWidget;
 use App\Filament\Widgets\ChaturbateStatsWidget;
+use App\Filament\Widgets\TrafficByCountryWidget;
 use App\Filament\Widgets\TrafficStatsWidget;
 use App\Filament\Widgets\TrafficTrendChartWidget;
+use App\Models\PageViewEvent;
 use App\Models\Site;
+use App\Services\CountryDetector;
 use App\Services\DeviceDetector;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -43,7 +46,7 @@ class StatsDashboard extends Page
     public function filtersForm(Schema $schema): Schema
     {
         return $schema->components([
-            Grid::make(['default' => 1, 'md' => 4])
+            Grid::make(['default' => 1, 'md' => 5])
                 ->columnSpanFull()
                 ->schema([
                     /**
@@ -70,6 +73,16 @@ class StatsDashboard extends Page
                         ])
                         ->placeholder('All devices (pooled)')
                         ->helperText('Events logged before '.DeviceDetector::TRACKING_SINCE.' have no device recorded and drop out of a filtered view.'),
+                    Select::make('country')
+                        ->label('Country')
+                        ->options(fn (): array => CountryDetector::options(PageViewEvent::query()
+                            ->when(Auth::user()?->administeredSiteIds() !== null, fn ($query) => $query->whereIn('site_id', Auth::user()->administeredSiteIds()))
+                            ->whereNotNull('country')
+                            ->distinct()
+                            ->pluck('country')))
+                        ->searchable()
+                        ->placeholder('All countries (pooled)')
+                        ->helperText('Events logged before '.CountryDetector::TRACKING_SINCE.' have no country recorded and drop out of a filtered view.'),
                     DatePicker::make('from')
                         ->label('From')
                         ->native(false)
@@ -90,8 +103,9 @@ class StatsDashboard extends Page
             Section::make('What these numbers mean')
                 ->collapsible()
                 ->schema([
-                    Text::make('Site traffic — your own pageviews and outbound clicks to Chaturbate, logged per site and device. Filtered by the selectors above.'),
-                    Text::make('Chaturbate revenue is account-wide across every domain this deploy serves — Chaturbate\'s affiliate Stats API has no way to report earnings per site or per tracking sub-id (its group_by/track query parameters are accepted but silently ignored), so that section ignores the Site filter above no matter what\'s selected.')
+                    Text::make('Site traffic — your own pageviews and outbound clicks to Chaturbate, logged per site, device and visitor country. Filtered by the selectors above.'),
+                    Text::make('Country — where the visitor is, from Cloudflare\'s geolocation on proxied domains and a MaxMind GeoLite2 lookup everywhere else. "Unknown" is traffic neither could place (or logged before '.CountryDetector::TRACKING_SINCE.').'),
+                    Text::make('Chaturbate revenue is account-wide across every domain this deploy serves — Chaturbate\'s affiliate Stats API has no way to report earnings per site or per tracking sub-id (its group_by/track query parameters are accepted but silently ignored), so that section ignores the Site, Device and Country filters above no matter what\'s selected.')
                         ->color('warning'),
                     Text::make('Payout figures exclude settlement rows (payout requests, adjustments, cashed-out tokens) — those are money moving out, not money earned, and mixing them in would understate revenue on days a payout was requested.'),
                 ]),
@@ -99,6 +113,7 @@ class StatsDashboard extends Page
                 ->schema($this->getWidgetsSchemaComponents([
                     TrafficStatsWidget::class,
                     TrafficTrendChartWidget::class,
+                    TrafficByCountryWidget::class,
                 ])),
             Section::make('Chaturbate revenue (account-wide)')
                 ->schema($this->getWidgetsSchemaComponents([

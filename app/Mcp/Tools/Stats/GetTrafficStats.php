@@ -7,6 +7,7 @@ use App\Mcp\Tools\AdminTool;
 use App\Models\CamClickEvent;
 use App\Models\PageViewEvent;
 use App\Models\Site;
+use App\Services\CountryDetector;
 use App\Services\DeviceDetector;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Database\Eloquent\Builder;
@@ -16,7 +17,7 @@ use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
-#[Description('Pageviews, outbound clicks and CTR — the numbers behind the Stats and A/B Test dashboards. Broken down by page (grid "/", feed "/feed", profile…), device, site and day. Defaults to the last 30 days.')]
+#[Description('Pageviews, outbound clicks and CTR — the numbers behind the Stats and A/B Test dashboards. Broken down by page (grid "/", feed "/feed", profile…), device, visitor country, site and day. Defaults to the last 30 days.')]
 #[IsReadOnly]
 class GetTrafficStats extends AdminTool
 {
@@ -25,6 +26,7 @@ class GetTrafficStats extends AdminTool
         $validated = $request->validate([
             'site' => ['nullable'],
             'device' => ['nullable', 'in:'.DeviceDetector::MOBILE.','.DeviceDetector::DESKTOP],
+            'country' => ['nullable', 'string', 'size:2'],
             'from' => ['nullable', 'date'],
             'until' => ['nullable', 'date', 'after_or_equal:from'],
         ]);
@@ -38,10 +40,12 @@ class GetTrafficStats extends AdminTool
         $from = $validated['from'] ?? now()->subDays(30)->toDateString();
         $until = $validated['until'] ?? now()->toDateString();
         $device = $validated['device'] ?? null;
+        $country = isset($validated['country']) ? strtoupper($validated['country']) : null;
 
         $scope = fn (Builder $query) => $query
             ->when($site, fn ($query) => $query->where('site_id', $site->id))
             ->when($device, fn ($query) => $query->where('device', $device))
+            ->when($country, fn ($query) => $query->where('country', $country))
             ->whereDate('created_at', '>=', $from)
             ->whereDate('created_at', '<=', $until);
 
@@ -58,6 +62,7 @@ class GetTrafficStats extends AdminTool
             'range' => ['from' => $from, 'until' => $until],
             'site' => $site?->only(['id', 'slug', 'name']) ?? 'all sites (pooled)',
             'device' => $device ?? 'all devices',
+            'country' => $country ?? 'all countries',
             'totals' => [
                 'pageviews' => $totalViews,
                 'outbound_clicks' => $totalClicks,
@@ -71,9 +76,10 @@ class GetTrafficStats extends AdminTool
                 ]])->all(),
             'by_device' => (clone $views)->selectRaw('device, count(*) as aggregate')->groupBy('device')
                 ->pluck('aggregate', 'device')->mapWithKeys(fn ($count, $key) => [$key ?: 'unrecorded' => (int) $count])->all(),
+            'by_country' => self::byCountry($views, $clicks),
             'by_site' => $site ? null : self::bySite($views, $clicks),
             'by_day' => self::byDay($views, $clicks),
-            'notes' => 'A/B test: compare by_page.grid vs by_page.feed CTR. profile CTR is the share of profile visitors who went on to Chaturbate. Events before '.DeviceDetector::TRACKING_SINCE.' have no device.',
+            'notes' => 'A/B test: compare by_page.grid vs by_page.feed CTR. profile CTR is the share of profile visitors who went on to Chaturbate. Events before '.DeviceDetector::TRACKING_SINCE.' have no device; events before '.CountryDetector::TRACKING_SINCE.' have no country (by_country key "unknown").',
         ]);
     }
 
@@ -104,6 +110,30 @@ class GetTrafficStats extends AdminTool
     }
 
     /**
+     * Keyed by ISO country code, busiest first; "unknown" collects events
+     * with no country recorded.
+     *
+     * @param  Builder<PageViewEvent>  $views
+     * @param  Builder<CamClickEvent>  $clicks
+     * @return array<string, array{name:string, pageviews:int, clicks:int, ctr_percent:?float}>
+     */
+    private static function byCountry(Builder $views, Builder $clicks): array
+    {
+        $viewCounts = (clone $views)->selectRaw('country, count(*) as aggregate')->groupBy('country')->pluck('aggregate', 'country');
+        $clickCounts = (clone $clicks)->selectRaw('country, count(*) as aggregate')->groupBy('country')->pluck('aggregate', 'country');
+
+        return $viewCounts->keys()->merge($clickCounts->keys())->unique()
+            ->mapWithKeys(fn (?string $country) => [($country ?: 'unknown') => [
+                'name' => CountryDetector::name($country ?: null),
+                'pageviews' => (int) ($viewCounts[$country] ?? 0),
+                'clicks' => (int) ($clickCounts[$country] ?? 0),
+                'ctr_percent' => self::ctr((int) ($clickCounts[$country] ?? 0), (int) ($viewCounts[$country] ?? 0)),
+            ]])
+            ->sortByDesc('pageviews')
+            ->all();
+    }
+
+    /**
      * @param  Builder<PageViewEvent>  $views
      * @param  Builder<CamClickEvent>  $clicks
      * @return array<string, array{pageviews:int, clicks:int}>
@@ -128,6 +158,7 @@ class GetTrafficStats extends AdminTool
         return [
             'site' => $schema->string()->description('Site id or slug; omit to pool every site.'),
             'device' => $schema->string()->enum([DeviceDetector::MOBILE, DeviceDetector::DESKTOP]),
+            'country' => $schema->string()->description('ISO 3166-1 alpha-2 visitor country code, e.g. "US"; omit to pool every country.'),
             'from' => $schema->string()->description('Start date YYYY-MM-DD (default 30 days ago).'),
             'until' => $schema->string()->description('End date YYYY-MM-DD, inclusive (default today).'),
         ];

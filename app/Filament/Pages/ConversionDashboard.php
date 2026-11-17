@@ -3,7 +3,9 @@
 namespace App\Filament\Pages;
 
 use App\Filament\Widgets\ConversionStatsWidget;
+use App\Models\PageViewEvent;
 use App\Models\Site;
+use App\Services\CountryDetector;
 use App\Services\DeviceDetector;
 use App\Services\HomepageAbTest;
 use BackedEnum;
@@ -48,11 +50,11 @@ class ConversionDashboard extends Page
         return $schema->components([
             /**
              * The filters schema HasFiltersForm hands us is itself a
-             * multi-column grid, so without spanning it this row of four
+             * multi-column grid, so without spanning it this row of five
              * filters is laid out inside one of its columns — four selects a
              * word wide, with their helper text wrapping to one word a line.
              */
-            Grid::make(['default' => 1, 'md' => 4])
+            Grid::make(['default' => 1, 'md' => 5])
                 ->columnSpanFull()
                 ->schema([
                     /**
@@ -96,6 +98,16 @@ class ConversionDashboard extends Page
                         ])
                         ->placeholder('All devices (pooled)')
                         ->helperText('Events logged before '.DeviceDetector::TRACKING_SINCE.' have no device recorded and drop out of a filtered view.'),
+                    Select::make('country')
+                        ->label('Country')
+                        ->options(fn (): array => CountryDetector::options(PageViewEvent::query()
+                            ->when(Auth::user()?->administeredSiteIds() !== null, fn ($query) => $query->whereIn('site_id', Auth::user()->administeredSiteIds()))
+                            ->whereNotNull('country')
+                            ->distinct()
+                            ->pluck('country')))
+                        ->searchable()
+                        ->placeholder('All countries (pooled)')
+                        ->helperText('Events logged before '.CountryDetector::TRACKING_SINCE.' have no country recorded and drop out of a filtered view.'),
                     DatePicker::make('from')
                         ->label('From')
                         ->native(false)
@@ -120,6 +132,7 @@ class ConversionDashboard extends Page
                     Text::make('Click — a real (non-bot) visitor clicking from a cam card through to the actual Chaturbate room, tracked by which page ("/" or "/feed") they clicked from.'),
                     Text::make('CTR — clicks ÷ views for that variant, as a percentage. This is the number that actually answers "which layout converts better," not raw click volume.'),
                     Text::make('Device — mobile means a phone-shaped screen, desktop everything else. Worth checking both: the feed is a mobile-first layout and the grid a desktop-first one, so a pooled CTR can hide a variant that wins on one and loses on the other. The same split reaches Chaturbate as an "-m"/"-d" suffix on the track sub-id, so revenue can be compared the same way.'),
+                    Text::make('Country — where the visitor is (Cloudflare geolocation, or a MaxMind lookup for domains not behind Cloudflare). Filter to one market to see whether a layout wins there too; small countries have small samples, so treat their CTRs with care.'),
                     Text::make('The date range below matters: before the split shipped, "/" always showed the grid (nothing sent visitors to "/feed" yet), so all-time totals make grid look artificially ahead. It defaults to the launch date for a fair comparison — widen it if you want to see the full history anyway.')
                         ->color('warning'),
                 ]),

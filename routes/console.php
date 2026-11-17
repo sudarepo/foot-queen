@@ -57,3 +57,10 @@ Schedule::command('queue:work --stop-when-empty --max-time=840 --timeout=900')
     ->everyMinute()
     ->withoutOverlapping(16)
     ->runInBackground();
+
+/*
+ * MaxMind publishes GeoLite2 updates twice a week; weekly keeps visitor
+ * countries accurate without downloading a database that barely changed.
+ * Skips itself when no MaxMind license key is configured.
+ */
+Schedule::command('geoip:update')->weekly()->withoutOverlapping(10);

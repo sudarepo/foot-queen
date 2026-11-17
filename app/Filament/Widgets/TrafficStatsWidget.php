@@ -23,14 +23,16 @@ class TrafficStatsWidget extends StatsOverviewWidget
         $siteId = $this->pageFilters['site_id'] ?? null;
         $siteIds = Auth::user()?->administeredSiteIds();
         $device = $this->pageFilters['device'] ?? null;
+        $country = $this->pageFilters['country'] ?? null;
         $from = $this->pageFilters['from'] ?? null;
         $until = $this->pageFilters['until'] ?? null;
 
-        $scope = function (Builder $query) use ($siteId, $siteIds, $device, $from, $until) {
+        $scope = function (Builder $query) use ($siteId, $siteIds, $device, $country, $from, $until) {
             $query
                 ->when($siteId, fn ($q) => $q->where('site_id', $siteId))
                 ->when($siteIds !== null, fn ($q) => $q->whereIn('site_id', $siteIds ?? []))
                 ->when($device, fn ($q) => $q->where('device', $device))
+                ->when($country, fn ($q) => $q->where('country', $country))
                 ->when($from, fn ($q) => $q->whereDate('created_at', '>=', $from))
                 ->when($until, fn ($q) => $q->whereDate('created_at', '<=', $until));
         };

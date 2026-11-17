@@ -50,6 +50,16 @@ class GetNetworkOverview extends AdminTool
             'last_24h' => [
                 'pageviews' => PageViewEvent::query()->where('created_at', '>=', $since)->count(),
                 'outbound_clicks' => CamClickEvent::query()->where('created_at', '>=', $since)->count(),
+                'top_countries' => PageViewEvent::query()
+                    ->where('created_at', '>=', $since)
+                    ->whereNotNull('country')
+                    ->selectRaw('country, count(*) as aggregate')
+                    ->groupBy('country')
+                    ->orderByDesc('aggregate')
+                    ->limit(5)
+                    ->pluck('aggregate', 'country')
+                    ->map(fn ($count): int => (int) $count)
+                    ->all(),
             ],
             'chaturbate_stats_last_synced_at' => ChaturbateStatsDay::query()->max('updated_at'),
             'forge_configured' => $forge->isConfigured(),
